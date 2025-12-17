@@ -7,9 +7,8 @@ import org.koitharu.kotatsu.parsers.model.MangaParserSource
 import org.koitharu.kotatsu.parsers.site.mangareader.MangaReaderParser
 import java.util.*
 
-@Broken
 @MangaSourceParser("ALCEASCAN", "AlceaScan", "id")
 internal class AlceaScan(context: MangaLoaderContext) :
-	MangaReaderParser(context, MangaParserSource.ALCEASCAN, "alceacomic.my.id", pageSize = 20, searchPageSize = 10) {
+	MangaReaderParser(context, MangaParserSource.ALCEASCAN, "alceacomic.my.id", "www.sekaikomik.lat", pageSize = 20, searchPageSize = 10) {
 	override val sourceLocale: Locale = Locale.ENGLISH
 }
