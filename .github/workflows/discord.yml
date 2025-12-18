@@ -51,6 +51,6 @@ jobs:
             > ${{ github.event.head_commit.message }}
             
           embed-color: 15105570
-          embed-footer-icon-url: "${{ secrets.PARSERS_THUMBNAIL_URL }}"
+          embed-footer-icon-url: "https://github.com/${{ github.actor }}.png"
           embed-footer-text: "Commit • ${{ steps.commit.outputs.short }}"
 
