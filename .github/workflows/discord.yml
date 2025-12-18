@@ -52,5 +52,5 @@ jobs:
             
           embed-color: 15105570
           embed-footer-icon-url: "https://github.com/${{ github.actor }}.png"
-          embed-footer-text: "Commit • ${{ steps.commit.outputs.short }}"
+          embed-footer-text: "${{ github.actor }} | Commit • ${{ steps.commit.outputs.short }}"
 
