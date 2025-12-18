@@ -41,9 +41,8 @@ jobs:
       # ===============================
       # 3️⃣ DELAY
       # ===============================
-      - name: Wait 1 second
-        if: ${{ steps.release.outputs.prerelease == 'false' }}
-        run: sleep 0.5
+      #- name: Wait 1 seconds 
+       # run: sleep 0.5
 
       # ===============================
       # 4️⃣ DOWNLOAD EMBED
