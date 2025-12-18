@@ -32,10 +32,28 @@ jobs:
             🌿 **Branch:** `${{ github.ref_name }}`
             🔖 **Commit:** [`${{ steps.commit.outputs.short }}`](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
 
-            📝 **Message:**
-            > ${{ github.event.head_commit.message }}
+    
 
           embed-color: 15105570
           embed-footer-icon-url: https://github.com/${{ github.actor }}.png
           embed-footer-text: ${{ github.actor }}
           embed-timestamp: ${{ github.event.head_commit.timestamp }}
+      # ===============================
+      # 3️⃣ DELAY
+      # ===============================
+      - name: Wait 1 second
+        if: ${{ steps.release.outputs.prerelease == 'false' }}
+        run: sleep 0.5
+
+      # ===============================
+      # 4️⃣ DOWNLOAD EMBED
+      # ===============================
+      - name: Send Download Hitori (Embed)
+        uses: tsickert/discord-webhook@v7.0.0
+        with:
+          webhook-url: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
+
+          embed-title: "📝 Message:"
+          embed-description: |
+            > ${{ github.event.head_commit.message }}
+          embed-color: 15105570
