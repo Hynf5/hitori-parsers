@@ -14,45 +14,41 @@ jobs:
         id: commit
         run: echo "short=${GITHUB_SHA::10}" >> $GITHUB_OUTPUT
 
-      - name: Send commit notification to Discord
+      # ===============================
+      # 1️⃣ EMBED INFO COMMIT
+      # ===============================
+      - name: Send Commit Info (Embed)
         uses: tsickert/discord-webhook@v7.0.0
         with:
           webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
 
-          embed-title: "🧩 Commit Update: ${{ github.event.repository.name }}"
+          embed-title: "🧩 Commit Update · ${{ github.event.repository.name }}"
           embed-url: https://github.com/${{ github.repository }}/commit/${{ github.sha }}
-          #embed-thumbnail-url: "${{ secrets.PARSERS_THUMBNAIL_URL }}"
-
-          # Identitas committer
-          #embed-author-name: ${{ github.actor }}
-          #embed-author-icon-url: https://github.com/${{ github.actor }}.png
+          embed-thumbnail-url: "${{ secrets.PARSERS_THUMBNAIL_URL }}"
+          
 
           embed-description: |
             📁 **Repo:** `${{ github.repository }}`
             🌿 **Branch:** `${{ github.ref_name }}`
             🔖 **Commit:** [`${{ steps.commit.outputs.short }}`](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
 
-    
-
           embed-color: 15105570
           embed-footer-icon-url: https://github.com/${{ github.actor }}.png
           embed-footer-text: ${{ github.actor }}
           embed-timestamp: ${{ github.event.head_commit.timestamp }}
-      # ===============================
-      # 3️⃣ DELAY
-      # ===============================
-      #- name: Wait 1 seconds 
-       # run: sleep 0.5
 
       # ===============================
-      # 4️⃣ DOWNLOAD EMBED
+      # 2️⃣ EMBED MESSAGE COMMIT
       # ===============================
-      - name: Send Download Hitori (Embed)
+      - name: Send Commit Message (Embed)
         uses: tsickert/discord-webhook@v7.0.0
         with:
           webhook-url: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
 
-          embed-title: "📝 Message:"
+          embed-title: "📝 Commit Message"
           embed-description: |
-            > ${{ github.event.head_commit.message }}
+            
+           > ${{ github.event.head_commit.message }}
+          
           embed-color: 15105570
+
