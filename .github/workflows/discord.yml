@@ -45,7 +45,7 @@ jobs:
         with:
           webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
 
-          embed-title: "📝 Commit Message"
+          embed-title: "📝 Message"
           embed-description: |
             
             > ${{ github.event.head_commit.message }}
