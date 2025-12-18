@@ -7,12 +7,12 @@ import org.koitharu.kotatsu.parsers.model.MangaListFilterCapabilities
 import org.koitharu.kotatsu.parsers.model.MangaParserSource
 import org.koitharu.kotatsu.parsers.site.mangareader.MangaReaderParser
 
-@MangaSourceParser("MANHWALAND_INK", "ManhwaLand.ink", "id", ContentType.HENTAI)
+@MangaSourceParser("MANHWALAND_INK", "ManhwaLAND.ink", "id", ContentType.HENTAI)
 internal class ManhwaLandInk(context: MangaLoaderContext) :
 	MangaReaderParser(
 		context,
 		MangaParserSource.MANHWALAND_INK,
-		"manhwaland.asia",
+		"02.manhwaland.land",
 		pageSize = 20,
 		searchPageSize = 10,
 	) {
