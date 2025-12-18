@@ -51,4 +51,5 @@ jobs:
             > ### ${{ github.event.head_commit.message }}
             
           embed-color: 15105570
+          embed-footer-text: "🧩 Commit • ${{ steps.commit.outputs.short }}"
 
