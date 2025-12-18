@@ -48,7 +48,7 @@ jobs:
           embed-title: "📝 Commit Message"
           embed-description: |
             
-           > ${{ github.event.head_commit.message }}
+            ${{ github.event.head_commit.message }}
           
           embed-color: 15105570
 
