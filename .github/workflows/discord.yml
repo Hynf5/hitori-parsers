@@ -43,7 +43,7 @@ jobs:
       - name: Send Commit Message (Embed)
         uses: tsickert/discord-webhook@v7.0.0
         with:
-          webhook-url: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
+          webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
 
           embed-title: "📝 Commit Message"
           embed-description: |
