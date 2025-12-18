@@ -7,4 +7,4 @@ import org.koitharu.kotatsu.parsers.site.zeistmanga.ZeistMangaParser
 
 @MangaSourceParser("LEPOYTL", "Lepoytl", "id")
 internal class Lepoytl(context: MangaLoaderContext) :
-	ZeistMangaParser(context, MangaParserSource.LEPOYTL, "www.lepoytl.cloud")
+	ZeistMangaParser(context, MangaParserSource.LEPOYTL, "www.lepoytl.my.id")
