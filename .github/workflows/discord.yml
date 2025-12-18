@@ -48,8 +48,9 @@ jobs:
           embed-title: "📝 Commit Message"
           embed-description: |
             
-            > ### ${{ github.event.head_commit.message }}
+            > ${{ github.event.head_commit.message }}
             
           embed-color: 15105570
-          embed-footer-text: "🧩 Commit • ${{ steps.commit.outputs.short }}"
+          embed-footer-icon-url: "${{ secrets.PARSERS_THUMBNAIL_URL }}"
+          embed-footer-text: "Commit • ${{ steps.commit.outputs.short }}"
 
