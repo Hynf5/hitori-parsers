@@ -21,7 +21,7 @@ jobs:
 
           embed-title: "🧩 Commit Update: ${{ github.event.repository.name }}"
           embed-url: https://github.com/${{ github.repository }}/commit/${{ github.sha }}
-          embed-thumbnail-url: "${{ secrets.PARSERS_THUMBNAIL_URL }}"
+          #embed-thumbnail-url: "${{ secrets.PARSERS_THUMBNAIL_URL }}"
 
           # Identitas committer
           #embed-author-name: ${{ github.actor }}
