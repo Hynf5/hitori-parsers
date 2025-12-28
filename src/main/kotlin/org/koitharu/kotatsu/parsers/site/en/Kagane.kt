@@ -212,7 +212,7 @@ internal class Kagane(context: MangaLoaderContext) :
             state = state,
             authors = authors,
             tags = genres.map { MangaTag(it, it, source) }.toSet(),
-            chapters = chapters.reversed()
+            chapters = chapters
         )
     }
 
@@ -303,9 +303,10 @@ internal class Kagane(context: MangaLoaderContext) :
 
         // 4. Intercept to get challenge
         val config = InterceptionConfig(
-            timeoutMs = 60000,
+            timeoutMs = 15000,  // Reduced from 60s to 15s - DRM challenge usually comes in 5-10s
             urlPattern = Regex("https://kotatsu\\.intercept/.*", RegexOption.IGNORE_CASE),
-            pageScript = script
+            pageScript = script,
+            maxRequests = 1  // Stop immediately after capturing the challenge
         )
 
         val interceptUrl = "https://$domain/series/$seriesId/$chapterId"
