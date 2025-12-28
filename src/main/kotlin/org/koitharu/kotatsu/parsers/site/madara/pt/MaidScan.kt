@@ -39,7 +39,7 @@ internal class MaidScan(context: MangaLoaderContext) : PagedMangaParser(
 	searchPageSize = 15,
 ) {
 	override val configKeyDomain = ConfigKey.Domain("empreguetes.xyz")
-	private val apiUrl = "https://api2.sussytoons.wtf"
+	private val apiUrl = "https://api.verdinha.wtf"
 	private val cdnUrl = "https://cdn.sussytoons.site"
 	private val scanId = 3
 
