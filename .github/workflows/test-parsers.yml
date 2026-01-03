@@ -1,4 +1,4 @@
-name: Parsers compile check (hitori-pr)
+name: Parsers check
 
 on:
   push:
@@ -6,25 +6,66 @@ on:
       - hitori-pr
     paths:
       - 'src/main/kotlin/org/koitharu/kotatsu/parsers/**'
-      
-permissions:
-    contents: read
 
 jobs:
-    build-and-test:
-        runs-on: ubuntu-latest
-        steps:
-        -   name: Checkout repository 🌏
-            uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+  build-and-test:
+    runs-on: ubuntu-latest
 
-        -   name: Set up enviroment 🔧
-            uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165 # v5.0.0
-            with:
-                java-version: '17'
-                distribution: 'temurin'
+    steps:
+      - name: Checkout repository 🌏
+        uses: actions/checkout@v5
 
-        -   name: Set up Gradle 📦
-            uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4.4.3
+      - name: Set up Java 🔧
+        uses: actions/setup-java@v5
+        with:
+          java-version: '17'
+          distribution: 'temurin'
 
-        -   name: Compile parsers 🚀
-            run: ./gradlew compileKotlin
+      - name: Set up Gradle 📦
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Compile parsers 🚀
+        id: build
+        run: ./gradlew compileKotlin
+
+      # ===============================
+      # ✅ SUCCESS NOTIFICATION
+      # ===============================
+      - name: Notify Discord (Success)
+        if: success()
+        uses: tsickert/discord-webhook@v7.0.0
+        with:
+          webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          embed-title: "✅ Parsers Build Success"
+          embed-description: |
+            📁 Repo: `${{ github.repository }}`
+            🌿 Branch: `${{ github.ref_name }}`
+            📝 Commit:
+            > ${{ github.event.head_commit.message }}
+          embed-color: 3066993
+          embed-url: https://github.com/${{ github.repository }}/commit/${{ github.sha }}
+          embed-footer-text: ${{ github.actor }}
+          embed-footer-icon-url: https://github.com/${{ github.actor }}.png
+
+      # ===============================
+      # ❌ ERROR NOTIFICATION
+      # ===============================
+      - name: Notify Discord (Failure)
+        if: failure()
+        uses: tsickert/discord-webhook@v7.0.0
+        with:
+          webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          embed-title: "❌ Parsers Build Failed"
+          embed-description: |
+            🚨 **Error Summary**
+            • Job: `build-and-test`
+            • Step: `Compile parsers`
+            
+            📝 Commit:
+            > ${{ github.event.head_commit.message }}
+
+            🔗 Logs:
+            https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          embed-color: 15158332
+          embed-footer-text: ${{ github.actor }}
+          embed-footer-icon-url: https://github.com/${{ github.actor }}.png
