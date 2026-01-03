@@ -31,7 +31,7 @@ jobs:
       # ===============================
       # ✅ SUCCESS NOTIFICATION
       # ===============================
-      - name: Notify Discord (Success)
+      - name: Notify Discord (Success) ✅
         if: success()
         uses: tsickert/discord-webhook@v7.0.0
         with:
@@ -44,13 +44,13 @@ jobs:
             > ${{ github.event.head_commit.message }}
           embed-color: 3066993
           embed-url: https://github.com/${{ github.repository }}/commit/${{ github.sha }}
-          embed-footer-text: ${{ github.actor }}
+          embed-footer-text: ${{ github.actor }} | ${{ github.sha.substring(0, 10) }}
           embed-footer-icon-url: https://github.com/${{ github.actor }}.png
 
       # ===============================
       # ❌ ERROR NOTIFICATION
       # ===============================
-      - name: Notify Discord (Failure)
+      - name: Notify Discord (Failure) ⛔
         if: failure()
         uses: tsickert/discord-webhook@v7.0.0
         with:
@@ -67,5 +67,5 @@ jobs:
             🔗 Logs:
             https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
           embed-color: 15158332
-          embed-footer-text: ${{ github.actor }}
+          embed-footer-text: ${{ github.actor }} | ${{ github.sha.substring(0, 10) }}
           embed-footer-icon-url: https://github.com/${{ github.actor }}.png
