@@ -7,6 +7,7 @@ import okhttp3.Request
 import org.json.JSONArray
 import org.jsoup.nodes.Document
 import org.koitharu.kotatsu.parsers.MangaLoaderContext
+import org.koitharu.kotatsu.parsers.config.ConfigKey
 import org.koitharu.kotatsu.parsers.core.PagedMangaParser
 import org.koitharu.kotatsu.parsers.model.ContentRating
 import org.koitharu.kotatsu.parsers.model.ContentType
@@ -49,6 +50,11 @@ internal abstract class NatsuParser(
 ) : PagedMangaParser(context, source, pageSize, pageSize) {
 
     override val sourceLocale: Locale = Locale.ENGLISH
+
+    override fun onCreateConfig(keys: MutableCollection<ConfigKey<*>>) {
+        super.onCreateConfig(keys)
+        keys.add(userAgentKey)
+    }
 
     override fun getRequestHeaders() = super.getRequestHeaders().newBuilder()
         .add("Referer", "https://$domain/")
@@ -303,13 +309,17 @@ internal abstract class NatsuParser(
         val headers = Headers.Companion.headersOf(
             "hx-request", "true",
             "hx-target", "chapter-list",
-            "hx-trigger", "chapter-list",
+            "hx-trigger", "getChapterList",
             "Referer", mangaAbsoluteUrl,
         )
 
         while (true) {
             val url = "https://${domain}/wp-admin/admin-ajax.php?manga_id=$mangaId&page=$page&action=chapter_list"
-            val doc = webClient.httpGet(url, headers).parseHtml()
+            val doc = try {
+                webClient.httpGet(url, headers).parseHtml()
+            } catch (e: Exception) {
+                break
+            }
 
             val chapterElements = doc.select("div#chapter-list > div[data-chapter-number]")
             if (chapterElements.isEmpty()) break
@@ -340,7 +350,7 @@ internal abstract class NatsuParser(
             page++
             if (page > 100) break
         }
-        return chapters.reversed()
+        return chapters.distinctBy { it.url }.reversed()
     }
 
     override suspend fun getPages(chapter: MangaChapter): List<MangaPage> {
