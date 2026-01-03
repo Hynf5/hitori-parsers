@@ -37,6 +37,7 @@ jobs:
         with:
           webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
           embed-title: "✅ Parsers Build Success"
+          embed-thumbnail-url: "${{ secrets.SUCCESS_THUMBNAIL_URL }}"
           embed-description: |
             📁 Repo: `${{ github.repository }}`
             🌿 Branch: `${{ github.ref_name }}`
