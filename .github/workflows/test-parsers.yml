@@ -28,6 +28,10 @@ jobs:
         id: build
         run: ./gradlew compileKotlin
 
+      - name: Set short SHA
+        id: sha
+        run: echo "SHORT_SHA=${GITHUB_SHA:0:10}" >> $GITHUB_ENV
+
       # ===============================
       # ✅ SUCCESS NOTIFICATION
       # ===============================
@@ -43,7 +47,7 @@ jobs:
             🌿 Branch: `${{ github.ref_name }}`
           embed-color: 3066993
           embed-url: https://github.com/${{ github.repository }}/commit/${{ github.sha }}
-          embed-footer-text: ${{ github.actor }} | ${{ github.sha.substring(0, 10) }}
+          embed-footer-text: ${{ github.actor }} | ${{ env.SHORT_SHA }}
           embed-footer-icon-url: https://github.com/${{ github.actor }}.png
 
       # ===============================
@@ -62,7 +66,7 @@ jobs:
             
           embed-color: 3066993
           embed-footer-icon-url: "https://github.com/${{ github.actor }}.png"
-          embed-footer-text: "${{ github.actor }} | ${{ github.sha.substring(0, 10) }}"
+          embed-footer-text: "${{ github.actor }} | ${{ env.SHORT_SHA }}"
           
 
       # ===============================
@@ -85,5 +89,6 @@ jobs:
             🔗 Logs:
             https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
           embed-color: 15158332
-          embed-footer-text: ${{ github.actor }} | ${{ github.sha.substring(0, 10) }}
+          embed-footer-text: ${{ github.actor }} | ${{ env.SHORT_SHA }}
           embed-footer-icon-url: https://github.com/${{ github.actor }}.png
+          
