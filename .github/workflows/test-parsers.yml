@@ -40,12 +40,29 @@ jobs:
           embed-description: |
             📁 Repo: `${{ github.repository }}`
             🌿 Branch: `${{ github.ref_name }}`
-            📝 Commit:
-            > ${{ github.event.head_commit.message }}
           embed-color: 3066993
           embed-url: https://github.com/${{ github.repository }}/commit/${{ github.sha }}
           embed-footer-text: ${{ github.actor }} | ${{ github.sha.substring(0, 10) }}
           embed-footer-icon-url: https://github.com/${{ github.actor }}.png
+
+      # ===============================
+      # 2️⃣ EMBED MESSAGE COMMIT
+      # ===============================
+      - name: Send Commit Message (Embed)
+        if: success()
+        uses: tsickert/discord-webhook@v7.0.0
+        with:
+          webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
+
+          embed-title: "📝 Commit"
+          embed-description: |
+            
+            > ${{ github.event.head_commit.message }}
+            
+          embed-color: 3066993
+          embed-footer-icon-url: "https://github.com/${{ github.actor }}.png"
+          embed-footer-text: "${{ github.actor }} | ${{ github.sha.substring(0, 10) }}"
+          
 
       # ===============================
       # ❌ ERROR NOTIFICATION
