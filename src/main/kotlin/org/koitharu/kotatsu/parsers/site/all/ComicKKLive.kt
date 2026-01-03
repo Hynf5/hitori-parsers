@@ -18,7 +18,7 @@ import org.koitharu.kotatsu.parsers.util.suspendlazy.suspendLazy
 import java.text.SimpleDateFormat
 import java.util.*
 
-@MangaSourceParser("COMICKKLIVE", "ComicK.live (Unofficial)")
+@MangaSourceParser("COMICKKLIVE", "ComicK.live (UnOfficial)")
 internal class ComicKKLive(context: MangaLoaderContext) :
     PagedMangaParser(context, MangaParserSource.COMICKKLIVE, 50) {
 
