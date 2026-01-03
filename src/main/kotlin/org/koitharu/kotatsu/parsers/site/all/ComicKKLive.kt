@@ -18,9 +18,9 @@ import org.koitharu.kotatsu.parsers.util.suspendlazy.suspendLazy
 import java.text.SimpleDateFormat
 import java.util.*
 
-@MangaSourceParser("COMICKLIVE", "ComicK (Unofficial)")
-internal class ComicKLive(context: MangaLoaderContext) :
-    PagedMangaParser(context, MangaParserSource.COMICKLIVE, 50) {
+@MangaSourceParser("COMICKKLIVE", "ComicKK (Unofficial)")
+internal class ComicKKLive(context: MangaLoaderContext) :
+    PagedMangaParser(context, MangaParserSource.COMICKKLIVE, 50) {
 
     override val configKeyDomain = ConfigKey.Domain(
         "comick.live",
