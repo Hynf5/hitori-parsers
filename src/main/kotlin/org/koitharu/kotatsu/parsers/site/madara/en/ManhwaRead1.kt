@@ -11,9 +11,9 @@ import org.koitharu.kotatsu.parsers.site.madara.MadaraParser
 import org.koitharu.kotatsu.parsers.util.*
 import java.text.SimpleDateFormat
 
-@MangaSourceParser("MANHWAAREAD", "ManhwaaREAD", "en", ContentType.HENTAI)
-internal class ManhwaaREAD(context: MangaLoaderContext) :
-    MadaraParser(context, MangaParserSource.MANHWAAREAD, "manhwaread.com", 30) {
+@MangaSourceParser("MANHWAREAD1", "ManhwaRead1", "en", ContentType.HENTAI)
+internal class ManhwaRead1(context: MangaLoaderContext) :
+    MadaraParser(context, MangaParserSource.MANHWAREAD1, "manhwaread.com", 30) {
 
     override val tagPrefix = "genre/"
     override val datePattern = "dd/MM/yyyy"
