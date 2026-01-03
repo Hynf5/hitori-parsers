@@ -1,4 +1,4 @@
-name: Parsers check
+name: Parsers Check
 
 on:
   push:
