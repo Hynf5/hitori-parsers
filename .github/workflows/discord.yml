@@ -22,7 +22,7 @@ jobs:
           echo "count=$COUNT" >> $GITHUB_OUTPUT
 
           # Buat list commit dengan format - [SHA](link) message - author
-          LIST=$(jq -r '.commits[] | "- [\(.id[0:7])](\(.url)) \(.message) - \(.author.name)"' $GITHUB_EVENT_PATH)
+          LIST=$(jq -r '.commits[] | "- [\(.id[0:7])](\(.url)) \(.message) - \(.author.username)"' $GITHUB_EVENT_PATH)
           echo "list=$LIST" >> $GITHUB_OUTPUT
 
       # ===============================
