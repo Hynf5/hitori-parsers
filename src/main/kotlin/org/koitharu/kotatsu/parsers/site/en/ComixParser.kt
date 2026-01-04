@@ -20,9 +20,12 @@ internal class Comix(context: MangaLoaderContext) :
 
     override val configKeyDomain = ConfigKey.Domain("comix.to")
 
-    private val preferredTeamKey = ConfigKey.PreferredBranch(
-        title = "Preferred scanlation team",
-    )
+    // Custom config key for preferred scanlation team
+    private class PreferredTeam : ConfigKey<String>("preferred_team") {
+        override val defaultValue: String = ""
+    }
+
+    private val preferredTeamKey = PreferredTeam()
 
     override fun onCreateConfig(keys: MutableCollection<ConfigKey<*>>) {
         super.onCreateConfig(keys)
@@ -366,7 +369,7 @@ internal class Comix(context: MangaLoaderContext) :
         val mostCompleteTeam = teamStats.maxByOrNull { it.value }?.key
 
         // Get user's preferred team from config
-        val preferredTeam = config[preferredTeamKey]
+        val preferredTeam: String = config[preferredTeamKey]
 
         // Select one version per chapter number
         val processedChapters = mutableListOf<JSONObject>()
