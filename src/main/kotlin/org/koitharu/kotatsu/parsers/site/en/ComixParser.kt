@@ -20,6 +20,15 @@ internal class Comix(context: MangaLoaderContext) :
 
     override val configKeyDomain = ConfigKey.Domain("comix.to")
 
+    private val preferredTeamKey = ConfigKey.PreferredBranch(
+        title = "Preferred scanlation team",
+    )
+
+    override fun onCreateConfig(keys: MutableCollection<ConfigKey<*>>) {
+        super.onCreateConfig(keys)
+        keys.add(preferredTeamKey)
+    }
+
     override val filterCapabilities: MangaListFilterCapabilities
         get() = MangaListFilterCapabilities(
             isSearchSupported = true,
@@ -356,27 +365,36 @@ internal class Comix(context: MangaLoaderContext) :
         // Find the team with most chapters (most complete)
         val mostCompleteTeam = teamStats.maxByOrNull { it.value }?.key
 
+        // Get user's preferred team from config
+        val preferredTeam = config[preferredTeamKey]
+
         // Select one version per chapter number
         val processedChapters = mutableListOf<JSONObject>()
 
         for ((chapterNumber, chapters) in chaptersByNumber) {
-            // Pick best version using scoring system (similar to ComickFun)
+            // Pick best version using scoring system
             val bestChapter = chapters.maxByOrNull { chapter ->
                 val scanlationGroup = chapter.optJSONObject("scanlation_group")
                 val teamName = scanlationGroup?.optString("name", null)
 
                 var score = 0
 
-                // Strongly prefer the most complete team (most chapters overall)
-                if (!teamName.isNullOrBlank() && teamName == mostCompleteTeam) {
+                // Highest priority: user's preferred team
+                if (!preferredTeam.isNullOrBlank() && !teamName.isNullOrBlank() && teamName == preferredTeam) {
+                    score += 10000
+                }
+                // Second priority: most complete team (if no user preference)
+                else if (!teamName.isNullOrBlank() && teamName == mostCompleteTeam) {
                     score += 1000
-                } else if (!teamName.isNullOrBlank()) {
-                    score += 500 // Some team is better than no team
+                }
+                // Third priority: any team is better than no team
+                else if (!teamName.isNullOrBlank()) {
+                    score += 500
                 }
 
-                // Prefer more recent uploads
+                // Prefer more recent uploads as tiebreaker
                 val createdAt = chapter.getLong("created_at")
-                score += (createdAt / 1000000).toInt() // Use timestamp as tiebreaker
+                score += (createdAt / 1000000).toInt()
 
                 score
             }
