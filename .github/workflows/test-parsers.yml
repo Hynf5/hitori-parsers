@@ -24,13 +24,36 @@ jobs:
       - name: Set up Gradle 📦
         uses: gradle/actions/setup-gradle@v4
 
+      # ===============================
+      # 🔥 Compile parsers & save log
+      # ===============================
       - name: Compile parsers 🚀
         id: build
-        run: ./gradlew compileKotlin
+        run: |
+          set -o pipefail
+          ./gradlew compileKotlin --stacktrace 2>&1 | tee build.log
 
       - name: Set short SHA
         id: sha
         run: echo "SHORT_SHA=${GITHUB_SHA:0:10}" >> $GITHUB_ENV
+
+      # ===============================
+      # ❌ Capture Gradle Kotlin errors
+      # ===============================
+      - name: Capture Gradle Kotlin Errors
+        id: gradle_errors
+        if: failure()
+        run: |
+          # Extract file:line:error message from log (Kotlin compiler errors)
+          ERRORS=$(grep -E "^[^:]+\.kt:[0-9]+: " build.log || true)
+          # Batasi max 1500 karakter agar muat di Discord embed
+          ERRORS=$(echo "$ERRORS" | head -c 1500)
+          if [ -z "$ERRORS" ]; then
+            ERRORS="No specific Kotlin compiler errors found, see full log."
+          fi
+          echo "ERROR_LOG<<EOF" >> $GITHUB_OUTPUT
+          echo "$ERRORS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       # ===============================
       # ✅ SUCCESS NOTIFICATION
@@ -58,16 +81,12 @@ jobs:
         uses: tsickert/discord-webhook@v7.0.0
         with:
           webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
-
           embed-title: "📝 Commit"
           embed-description: |
-            
             > ${{ github.event.head_commit.message }}
-            
           embed-color: 3066993
           embed-footer-icon-url: "https://github.com/${{ github.actor }}.png"
           embed-footer-text: "${{ github.actor }} | ${{ env.SHORT_SHA }}"
-          
 
       # ===============================
       # ❌ ERROR NOTIFICATION
@@ -87,9 +106,13 @@ jobs:
             📝 Commit:
             > ${{ github.event.head_commit.message }}
 
-            🔗 Logs:
+            ⚡ Kotlin Compiler Errors:
+            ```
+            ${{ steps.gradle_errors.outputs.ERROR_LOG }}
+            ```
+
+            🔗 Full Logs:
             https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
           embed-color: 15158332
           embed-footer-text: ${{ github.actor }} | ${{ env.SHORT_SHA }}
           embed-footer-icon-url: https://github.com/${{ github.actor }}.png
-          
