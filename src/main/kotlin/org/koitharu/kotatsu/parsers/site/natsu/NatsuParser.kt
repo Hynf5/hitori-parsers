@@ -7,7 +7,6 @@ import okhttp3.Request
 import org.json.JSONArray
 import org.jsoup.nodes.Document
 import org.koitharu.kotatsu.parsers.MangaLoaderContext
-import org.koitharu.kotatsu.parsers.config.ConfigKey
 import org.koitharu.kotatsu.parsers.core.PagedMangaParser
 import org.koitharu.kotatsu.parsers.model.ContentRating
 import org.koitharu.kotatsu.parsers.model.ContentType
@@ -50,11 +49,6 @@ internal abstract class NatsuParser(
 ) : PagedMangaParser(context, source, pageSize, pageSize) {
 
     override val sourceLocale: Locale = Locale.ENGLISH
-
-    override fun onCreateConfig(keys: MutableCollection<ConfigKey<*>>) {
-        super.onCreateConfig(keys)
-        keys.add(userAgentKey)
-    }
 
     override fun getRequestHeaders() = super.getRequestHeaders().newBuilder()
         .add("Referer", "https://$domain/")
@@ -299,8 +293,6 @@ internal abstract class NatsuParser(
         )
     }
 
-	protected open val hxTrigger = "chapter-list"
-
     protected open suspend fun loadChapters(
         mangaId: String,
         mangaAbsoluteUrl: String,
@@ -308,10 +300,10 @@ internal abstract class NatsuParser(
         val chapters = mutableListOf<MangaChapter>()
         var page = 1
 
-        val headers = Headers.headersOf(
+        val headers = Headers.Companion.headersOf(
             "hx-request", "true",
             "hx-target", "chapter-list",
-            "hx-trigger", hxTrigger,
+            "hx-trigger", "chapter-list",
             "Referer", mangaAbsoluteUrl,
         )
 
@@ -368,7 +360,7 @@ internal abstract class NatsuParser(
         return try {
             // Try to fetch from WP JSON API first (more reliable)
             val response = webClient.httpGet("https://${domain}/wp-json/wp/v2/genre?per_page=100&page=1&orderby=count&order=desc")
-            val jsonText = response.body.use { it.string() }
+            val jsonText = response.body.use { it?.string() } ?: return emptySet()
             val jsonArray = org.json.JSONArray(jsonText)
             val tags = mutableSetOf<MangaTag>()
 
@@ -384,7 +376,7 @@ internal abstract class NatsuParser(
                 )
             }
             tags
-        } catch (_: Exception) {
+        } catch (e: Exception) {
             // Fallback to advanced-search page method
             try {
                 val doc = webClient.httpGet("https://${domain}/advanced-search/").parseHtml()
@@ -416,7 +408,7 @@ internal abstract class NatsuParser(
                     )
                 }
                 tags
-            } catch (_: Exception) {
+            } catch (e2: Exception) {
                 emptySet()
             }
         }
@@ -475,7 +467,7 @@ internal abstract class NatsuParser(
         if (extraHeaders != null) {
             for (name in extraHeaders.names()) {
                 if (!name.equals("Content-Type", ignoreCase = true)) {
-                    val value = extraHeaders[name] ?: continue
+                    val value = extraHeaders.get(name) ?: continue
                     requestBuilder.addHeader(name, value)
                 }
             }
