@@ -102,15 +102,15 @@ jobs:
             • Job: `build-and-test`
             • Step: `Compile parsers`
             
-            📝 Commit:
+            **📝 Commit:**
             > ${{ github.event.head_commit.message }}
 
-            ⚡ Kotlin Compiler Errors:
+            **⚡ Kotlin Compiler Errors:**
             ```
             ${{ steps.gradle_errors.outputs.ERROR_LOG }}
             ```
-
-            🔗 Full Logs:
+            
+            **🔗 Full Logs:**
             https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
           embed-color: 15158332
           embed-footer-text: ${{ github.actor }} | ${{ env.SHORT_SHA }}
