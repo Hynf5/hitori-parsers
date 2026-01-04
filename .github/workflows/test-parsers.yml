@@ -66,12 +66,11 @@ jobs:
           embed-title: "✅ Test Parsers Build Success"
           embed-thumbnail-url: "${{ secrets.SUCCESS_THUMBNAIL_URL }}"
           embed-description: |
-            📁 Repo: `${{ github.repository }}`
-            🌿 Branch: `${{ github.ref_name }}`
+            > **📁 Repo:** `${{ github.repository }}`
+            > **🌿 Branch:** `${{ github.ref_name }}`
+            > **🔖 Commit:** [`${{ env.SHORT_SHA }}`](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
           embed-color: 3066993
           embed-url: https://github.com/${{ github.repository }}/commit/${{ github.sha }}
-          embed-footer-text: ${{ github.actor }} | ${{ env.SHORT_SHA }}
-          embed-footer-icon-url: https://github.com/${{ github.actor }}.png
 
       # ===============================
       # 2️⃣ EMBED MESSAGE COMMIT
