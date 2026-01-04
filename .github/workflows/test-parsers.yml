@@ -78,6 +78,7 @@ jobs:
         with:
           webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
           embed-title: "❌ Test Parsers Build Failed"
+          embed-thumbnail-url: "${{ secrets.EROR_THUMBNAIL_URL }}"
           embed-description: |
             🚨 **Error Summary**
             • Job: `build-and-test`
