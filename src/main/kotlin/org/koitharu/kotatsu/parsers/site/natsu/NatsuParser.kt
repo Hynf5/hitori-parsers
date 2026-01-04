@@ -38,7 +38,7 @@ import java.util.EnumSet
 import java.util.Locale
 
 /**
- * Base parser for NatsuId WordPress theme
+ * Base parser for NatsuId WordPress themes
  * Theme: https://themesinfo.com/natsu_id-theme-wordpress-c8x1c
  * Author: Dzul Qurnain
  */
