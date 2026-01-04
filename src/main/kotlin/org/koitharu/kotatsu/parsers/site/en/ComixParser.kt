@@ -20,15 +20,6 @@ internal class Comix(context: MangaLoaderContext) :
 
     override val configKeyDomain = ConfigKey.Domain("comix.to")
 
-    private val preferredTeamKey = ConfigKey.PreferredBranch(
-        title = "Preferred scanlation team",
-    )
-
-    override fun onCreateConfig(keys: MutableCollection<ConfigKey<*>>) {
-        super.onCreateConfig(keys)
-        keys.add(preferredTeamKey)
-    }
-
     override val filterCapabilities: MangaListFilterCapabilities
         get() = MangaListFilterCapabilities(
             isSearchSupported = true,
@@ -349,88 +340,59 @@ internal class Comix(context: MangaLoaderContext) :
             page++
         }
 
-        // Track how many chapters each team has (to find most complete team)
-        val teamStats = mutableMapOf<String, Int>()
-        val chaptersByNumber = allChapters.groupBy { it.getDouble("number") }
-
-        // Count chapters per team
+        // Group chapters by scanlation team
+        val chaptersByTeam = mutableMapOf<String, MutableList<JSONObject>>()
         for (chapter in allChapters) {
             val scanlationGroup = chapter.optJSONObject("scanlation_group")
-            val teamName = scanlationGroup?.optString("name", null)
-            if (!teamName.isNullOrBlank()) {
-                teamStats[teamName] = teamStats.getOrDefault(teamName, 0) + 1
+            val teamName = scanlationGroup?.optString("name", null) ?: "Unknown"
+            chaptersByTeam.getOrPut(teamName) { mutableListOf() }.add(chapter)
+        }
+
+        // Get all unique chapter numbers
+        val allChapterNumbers = allChapters.map { it.getDouble("number").toFloat() }.toSet()
+
+        // Build chapters with branches - each team gets complete chapter list with gaps filled
+        val chaptersBuilder = ChaptersListBuilder(allChapters.size * chaptersByTeam.size)
+
+        for ((teamName, teamChapters) in chaptersByTeam) {
+            // Map of chapter numbers this team has
+            val teamChapterMap = teamChapters.associateBy { it.getDouble("number").toFloat() }
+
+            // For each chapter number, use team's version if available, otherwise find best alternative
+            for (chapterNumber in allChapterNumbers) {
+                val chapterData = teamChapterMap[chapterNumber]
+                    ?: allChapters.find { it.getDouble("number").toFloat() == chapterNumber }
+                    ?: continue
+
+                val chapterId = chapterData.getLong("chapter_id")
+                val number = chapterData.getDouble("number").toFloat()
+                val name = chapterData.optString("name", "").nullIfEmpty()
+                val createdAt = chapterData.getLong("created_at")
+                val scanlationGroup = chapterData.optJSONObject("scanlation_group")
+                val actualTeamName = scanlationGroup?.optString("name", null) ?: "Unknown"
+
+                val title = if (name != null) {
+                    "Chapter $number: $name"
+                } else {
+                    "Chapter $number"
+                }
+
+                val chapter = MangaChapter(
+                    id = generateUid("$teamName-$chapterId"),
+                    title = title,
+                    number = number,
+                    volume = 0,
+                    url = "/title/$hashId/$chapterId-chapter-${number.toInt()}",
+                    uploadDate = createdAt * 1000L,
+                    source = source,
+                    scanlator = actualTeamName,
+                    branch = teamName,
+                )
+
+                chaptersBuilder.add(chapter)
             }
         }
 
-        // Find the team with most chapters (most complete)
-        val mostCompleteTeam = teamStats.maxByOrNull { it.value }?.key
-
-        // Get user's preferred team from config
-        val preferredTeam = config[preferredTeamKey]
-
-        // Select one version per chapter number
-        val processedChapters = mutableListOf<JSONObject>()
-
-        for ((chapterNumber, chapters) in chaptersByNumber) {
-            // Pick best version using scoring system
-            val bestChapter = chapters.maxByOrNull { chapter ->
-                val scanlationGroup = chapter.optJSONObject("scanlation_group")
-                val teamName = scanlationGroup?.optString("name", null)
-
-                var score = 0
-
-                // Highest priority: user's preferred team
-                if (!preferredTeam.isNullOrBlank() && !teamName.isNullOrBlank() && teamName == preferredTeam) {
-                    score += 10000
-                }
-                // Second priority: most complete team (if no user preference)
-                else if (!teamName.isNullOrBlank() && teamName == mostCompleteTeam) {
-                    score += 1000
-                }
-                // Third priority: any team is better than no team
-                else if (!teamName.isNullOrBlank()) {
-                    score += 500
-                }
-
-                // Prefer more recent uploads as tiebreaker
-                val createdAt = chapter.getLong("created_at")
-                score += (createdAt / 1000000).toInt()
-
-                score
-            }
-
-            if (bestChapter != null) {
-                processedChapters.add(bestChapter)
-            }
-        }
-
-        val finalChapters = processedChapters.sortedByDescending { it.getDouble("number") }
-
-        return finalChapters.mapIndexedNotNull { index, item ->
-            val chapterId = item.getLong("chapter_id")
-            val number = item.getDouble("number").toFloat()
-            val name = item.optString("name", "").nullIfEmpty()
-            val createdAt = item.getLong("created_at")
-            val scanlationGroup = item.optJSONObject("scanlation_group")
-            val scanlatorName = scanlationGroup?.optString("name", null)
-
-            val title = if (name != null) {
-                "Chapter $number: $name"
-            } else {
-                "Chapter $number"
-            }
-
-            MangaChapter(
-                id = generateUid(chapterId.toString()),
-                title = title,
-                number = number,
-                volume = 0,
-                url = "/title/$hashId/$chapterId-chapter-${number.toInt()}",
-                uploadDate = createdAt * 1000L, // Convert to milliseconds
-                source = source,
-                scanlator = scanlatorName,
-                branch = null,
-            )
-        }.reversed() // Reverse to have ascending order
+        return chaptersBuilder.toList().reversed()
     }
 }

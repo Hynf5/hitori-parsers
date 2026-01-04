@@ -151,9 +151,22 @@ internal class Klz9(context: MangaLoaderContext) :
 			val chapterTitle = chapterObj.optString("name", "").nullIfEmpty()
 			val uploadDate = parseChapterDate(chapterObj.optString("last_update", ""))
 
+			// Format chapter number to remove .0 if it's a whole number
+			val formattedNumber = if (chapterNumber % 1 == 0f) {
+				chapterNumber.toInt().toString()
+			} else {
+				chapterNumber.toString()
+			}
+
+			val title = if (chapterTitle != null) {
+				"Chapter $formattedNumber: $chapterTitle"
+			} else {
+				"Chapter $formattedNumber"
+			}
+
 			MangaChapter(
 				id = generateUid(chapterId),
-				title = chapterTitle ?: "Chapter $chapterNumber",
+				title = title,
 				number = chapterNumber,
 				volume = 0,
 				url = chapterId.toString(),
