@@ -20,18 +20,6 @@ internal class Comix(context: MangaLoaderContext) :
 
     override val configKeyDomain = ConfigKey.Domain("comix.to")
 
-    // Custom config key for preferred scanlation team
-    private class PreferredTeam : ConfigKey<String>("preferred_team") {
-        override val defaultValue: String = ""
-    }
-
-    private val preferredTeamKey = PreferredTeam()
-
-    override fun onCreateConfig(keys: MutableCollection<ConfigKey<*>>) {
-        super.onCreateConfig(keys)
-        keys.add(preferredTeamKey)
-    }
-
     override val filterCapabilities: MangaListFilterCapabilities
         get() = MangaListFilterCapabilities(
             isSearchSupported = true,
@@ -352,70 +340,23 @@ internal class Comix(context: MangaLoaderContext) :
             page++
         }
 
-        // Track how many chapters each team has (to find most complete team)
-        val teamStats = mutableMapOf<String, Int>()
-        val chaptersByNumber = allChapters.groupBy { it.getDouble("number") }
+        // Build chapters with branches for different scanlation teams (like MangaDex does for languages)
+        val chaptersBuilder = ChaptersListBuilder(allChapters.size)
+        val branchedChapters = HashMap<String?, HashMap<Float, MangaChapter>>()
 
-        // Count chapters per team
-        for (chapter in allChapters) {
-            val scanlationGroup = chapter.optJSONObject("scanlation_group")
-            val teamName = scanlationGroup?.optString("name", null)
-            if (!teamName.isNullOrBlank()) {
-                teamStats[teamName] = teamStats.getOrDefault(teamName, 0) + 1
-            }
-        }
-
-        // Find the team with most chapters (most complete)
-        val mostCompleteTeam = teamStats.maxByOrNull { it.value }?.key
-
-        // Get user's preferred team from config
-        val preferredTeam: String = config[preferredTeamKey]
-
-        // Select one version per chapter number
-        val processedChapters = mutableListOf<JSONObject>()
-
-        for ((chapterNumber, chapters) in chaptersByNumber) {
-            // Pick best version using scoring system
-            val bestChapter = chapters.maxByOrNull { chapter ->
-                val scanlationGroup = chapter.optJSONObject("scanlation_group")
-                val teamName = scanlationGroup?.optString("name", null)
-
-                var score = 0
-
-                // Highest priority: user's preferred team
-                if (!preferredTeam.isNullOrBlank() && !teamName.isNullOrBlank() && teamName == preferredTeam) {
-                    score += 10000
-                }
-                // Second priority: most complete team (if no user preference)
-                else if (!teamName.isNullOrBlank() && teamName == mostCompleteTeam) {
-                    score += 1000
-                }
-                // Third priority: any team is better than no team
-                else if (!teamName.isNullOrBlank()) {
-                    score += 500
-                }
-
-                // Prefer more recent uploads as tiebreaker
-                val createdAt = chapter.getLong("created_at")
-                score += (createdAt / 1000000).toInt()
-
-                score
-            }
-
-            if (bestChapter != null) {
-                processedChapters.add(bestChapter)
-            }
-        }
-
-        val finalChapters = processedChapters.sortedByDescending { it.getDouble("number") }
-
-        return finalChapters.mapIndexedNotNull { index, item ->
+        for (item in allChapters) {
             val chapterId = item.getLong("chapter_id")
             val number = item.getDouble("number").toFloat()
             val name = item.optString("name", "").nullIfEmpty()
             val createdAt = item.getLong("created_at")
             val scanlationGroup = item.optJSONObject("scanlation_group")
-            val scanlatorName = scanlationGroup?.optString("name", null)
+            val teamName = scanlationGroup?.optString("name", null) ?: "Unknown"
+
+            // Generate unique branch name for this team
+            val branch = (allChapters.indices).firstNotNullOf { i ->
+                val b = if (i == 0) teamName else "$teamName ($i)"
+                if (branchedChapters[b]?.get(number) == null) b else null
+            }
 
             val title = if (name != null) {
                 "Chapter $number: $name"
@@ -423,7 +364,7 @@ internal class Comix(context: MangaLoaderContext) :
                 "Chapter $number"
             }
 
-            MangaChapter(
+            val chapter = MangaChapter(
                 id = generateUid(chapterId.toString()),
                 title = title,
                 number = number,
@@ -431,9 +372,16 @@ internal class Comix(context: MangaLoaderContext) :
                 url = "/title/$hashId/$chapterId-chapter-${number.toInt()}",
                 uploadDate = createdAt * 1000L, // Convert to milliseconds
                 source = source,
-                scanlator = scanlatorName,
-                branch = null,
+                scanlator = teamName,
+                branch = branch,
             )
-        }.reversed() // Reverse to have ascending order
+
+            // Add chapter to builder and track in branchedChapters map
+            if (chaptersBuilder.add(chapter)) {
+                branchedChapters.getOrPut(branch, ::HashMap)[number] = chapter
+            }
+        }
+
+        return chaptersBuilder.toList()
     }
 }
