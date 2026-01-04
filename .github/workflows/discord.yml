@@ -14,8 +14,19 @@ jobs:
         id: commit
         run: echo "short=${GITHUB_SHA::10}" >> $GITHUB_OUTPUT
 
+      - name: Build commit list
+        id: commits
+        run: |
+          # Hitung jumlah commit
+          COUNT=$(jq '.commits | length' $GITHUB_EVENT_PATH)
+          echo "count=$COUNT" >> $GITHUB_OUTPUT
+
+          # Buat list commit dengan format - [SHA](link) message - author
+          LIST=$(jq -r '.commits[] | "- [\(.id[0:7])](\(.url)) \(.message) - \(.author.name)"' $GITHUB_EVENT_PATH)
+          echo "list=$LIST" >> $GITHUB_OUTPUT
+
       # ===============================
-      # 1️⃣ EMBED INFO COMMIT
+      # 1️⃣ EMBED INFO COMMIT (HEAD)
       # ===============================
       - name: Send Commit Info (Embed)
         uses: tsickert/discord-webhook@v7.0.0
@@ -25,31 +36,24 @@ jobs:
           embed-title: "🧩 New Commit: ${{ github.event.repository.name }}"
           embed-url: https://github.com/${{ github.repository }}/commit/${{ github.sha }}
           embed-thumbnail-url: "${{ secrets.PARSERS_THUMBNAIL_URL }}"
-          
-
           embed-description: |
             > 📁 **Repo:** `${{ github.repository }}`
             > 🌿 **Branch:** `${{ github.ref_name }}`
             > 🔖 **Commit:** [`${{ steps.commit.outputs.short }}`](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
-
           embed-color: 15105570
-          
 
       # ===============================
-      # 2️⃣ EMBED MESSAGE COMMIT
+      # 2️⃣ EMBED MESSAGE COMMIT 
       # ===============================
       - name: Send Commit Message (Embed)
         uses: tsickert/discord-webhook@v7.0.0
         with:
           webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
 
-          embed-title: "📝 Message"
+          embed-title: "📝 Message: ${{ steps.commits.outputs.count }} new Commit(s)"
           embed-description: |
-            
-            > ${{ github.event.head_commit.message }}
-            
+            ${{ steps.commits.outputs.list }}
           embed-color: 15105570
           embed-footer-icon-url: "https://github.com/${{ github.actor }}.png"
-          embed-footer-text: "${{ github.actor }} | C+${{ steps.commit.outputs.short }}"
+          embed-footer-text: "${{ github.actor }}"
           embed-timestamp: "${{ github.event.head_commit.timestamp }}"
-
