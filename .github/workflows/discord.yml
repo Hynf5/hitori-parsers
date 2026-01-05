@@ -50,7 +50,7 @@ jobs:
         with:
           webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
 
-          embed-title: "📝 Message: ${{ steps.commits.outputs.count }} new Commit(s)"
+          embed-title: "📝 Commit: ${{ steps.commits.outputs.count }} "
           embed-description: |
             ${{ steps.commits.outputs.list }}
           embed-color: 15105570
