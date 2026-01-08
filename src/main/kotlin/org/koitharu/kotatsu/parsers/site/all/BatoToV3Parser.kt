@@ -19,10 +19,10 @@ import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
-@MangaSourceParser("BATOTO", "Bato.To")
-internal class BatoToParser(context: MangaLoaderContext) : PagedMangaParser(
+@MangaSourceParser("BATOTOV3", "Bato.To v3")
+internal class BatoToV3Parser(context: MangaLoaderContext) : PagedMangaParser(
 	context = context,
-	source = MangaParserSource.BATOTO,
+	source = MangaParserSource.BATOTOV3,
 	pageSize = 60,
 	searchPageSize = 20,
 ), MangaParserAuthProvider {
