@@ -17,13 +17,14 @@ jobs:
       - name: Build commit list
         id: commits
         run: |
-          # Hitung jumlah commit
-          COUNT=$(jq '.commits | length' $GITHUB_EVENT_PATH)
-          echo "count=$COUNT" >> $GITHUB_OUTPUT
+           COUNT=$(jq '.commits | length' "$GITHUB_EVENT_PATH")
+           echo "count=$COUNT" >> "$GITHUB_OUTPUT"
 
-          # Buat list commit dengan format - [SHA](link) message - author
-          LIST=$(jq -r '.commits[] | "- [\(.id[0:7])](\(.url)) \(.message) - \(.author.username)"' $GITHUB_EVENT_PATH)
-          echo "list=$LIST" >> $GITHUB_OUTPUT
+           echo "list<<EOF" >> "$GITHUB_OUTPUT"
+           jq -r '.commits[] |
+             "- [\(.id[0:7])](\(.url)) \(.message) - \(.author.username // .author.name)"
+           ' "$GITHUB_EVENT_PATH" >> "$GITHUB_OUTPUT"
+           echo "EOF" >> "$GITHUB_OUTPUT"
 
       # ===============================
       # 1️⃣ EMBED INFO COMMIT (HEAD)
