@@ -280,7 +280,10 @@ internal class KdtScans(context: MangaLoaderContext) :
             val item = graphArray.getJSONObject(i)
             if (item.has("primaryImageOfPage")) {
                 val imageObj = item.getJSONObject("primaryImageOfPage")
-                primaryImageUrl = imageObj.optString("url")
+                // Try both "@id" and "url" fields
+                primaryImageUrl = imageObj.optString("@id").ifEmpty {
+                    imageObj.optString("url")
+                }
                 println("[KdtScans] Found primaryImageOfPage at index $i: $primaryImageUrl")
                 if (primaryImageUrl.isNotBlank()) break
             }

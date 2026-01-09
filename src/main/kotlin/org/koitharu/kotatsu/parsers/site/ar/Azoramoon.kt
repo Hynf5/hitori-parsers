@@ -98,6 +98,10 @@ internal class Azoramoon(context: MangaLoaderContext) :
 			try {
 				val jsonObject = JSONObject(body)
 				val arr = when {
+					jsonObject.has("posts") -> {
+						println("[Azoramoon] Found 'posts' field in JSONObject")
+						jsonObject.getJSONArray("posts")
+					}
 					jsonObject.has("data") -> {
 						println("[Azoramoon] Found 'data' field in JSONObject")
 						jsonObject.getJSONArray("data")
@@ -107,7 +111,8 @@ internal class Azoramoon(context: MangaLoaderContext) :
 						jsonObject.getJSONArray("results")
 					}
 					else -> {
-						println("[Azoramoon] No 'data' or 'results' field found")
+						println("[Azoramoon] No 'posts', 'data' or 'results' field found")
+						println("[Azoramoon] Available keys: ${jsonObject.keys().asSequence().toList()}")
 						JSONArray()
 					}
 				}
