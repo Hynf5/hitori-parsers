@@ -33,6 +33,7 @@ import org.koitharu.kotatsu.parsers.util.textOrNull
 import org.koitharu.kotatsu.parsers.util.toAbsoluteUrl
 import org.koitharu.kotatsu.parsers.util.toTitleCase
 import org.koitharu.kotatsu.parsers.util.urlEncoded
+import org.koitharu.kotatsu.parsers.webview.InterceptionConfig
 import java.text.SimpleDateFormat
 import java.util.EnumSet
 
@@ -41,6 +42,10 @@ internal class KdtScans(context: MangaLoaderContext) :
     PagedMangaParser(context, MangaParserSource.KDTSCANS, 20) {
 
     override val configKeyDomain = ConfigKey.Domain("www.silentquill.net")
+
+    override fun getRequestHeaders() = super.getRequestHeaders().newBuilder()
+        .add("Referer", "https://$domain/")
+        .build()
 
     override val availableSortOrders: Set<SortOrder> = EnumSet.of(
         SortOrder.RELEVANCE,
@@ -222,17 +227,57 @@ internal class KdtScans(context: MangaLoaderContext) :
         )
     }
 
+    override suspend fun getRelatedManga(seed: Manga): List<Manga> = emptyList()
+
     override suspend fun getPages(chapter: MangaChapter): List<MangaPage> {
-        val doc = webClient.httpGet(chapter.url.toAbsoluteUrl(domain)).parseHtml()
-        return doc.select("#readerarea img").map { img ->
-            val url = img.attr("data-src").ifEmpty { img.src().orEmpty() }
-            MangaPage(
-                id = generateUid(url),
-                url = url,
-                preview = null,
-                source = source,
-            )
-        }
+        val fullUrl = chapter.url.toAbsoluteUrl(domain)
+
+        // JavaScript that polls for the end marker image (reen_wes.webp)
+        val pageScript = """
+            (() => {
+                // Check if the end marker image has loaded
+                const images = document.querySelectorAll('img');
+                for (let img of images) {
+                    if (img.src && img.src.includes('reen_wes.webp')) {
+                        return 'END_MARKER_FOUND';
+                    }
+                }
+
+                // Check if we've been waiting for 10 seconds
+                if (typeof window.__kdtStartTime === 'undefined') {
+                    window.__kdtStartTime = Date.now();
+                }
+
+                const elapsed = Date.now() - window.__kdtStartTime;
+                if (elapsed >= 10000) {
+                    return 'TIMEOUT';
+                }
+
+                // Keep polling
+                return null;
+            })();
+        """.trimIndent()
+
+        // Configure interception to capture all image requests from cdn.asdasdhg.com
+        val config = InterceptionConfig(
+            timeoutMs = 15000,
+            urlPattern = Regex("https://cdn\\.asdasdhg\\.com/.*\\.(webp|jpg|jpeg|png)", RegexOption.IGNORE_CASE),
+            pageScript = pageScript
+        )
+
+        val interceptedRequests = context.interceptWebViewRequests(fullUrl, config)
+
+        // Filter out the end marker image (reen_wes.webp)
+        return interceptedRequests
+            .filter { !it.url.contains("reen_wes.webp") }
+            .map { request ->
+                MangaPage(
+                    id = generateUid(request.url),
+                    url = request.url,
+                    preview = null,
+                    source = source,
+                )
+            }
     }
 
     private fun parseStatus(status: String): MangaState? {
