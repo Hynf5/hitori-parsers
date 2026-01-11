@@ -359,7 +359,7 @@ internal class Azoramoon(context: MangaLoaderContext) :
 		val fullUrl = chapter.url.toAbsoluteUrl(domain)
 		val doc = webClient.httpGet(fullUrl).parseHtml()
 
-		return doc.select("div.comic-images-wrapper img, div.chapter-images img, img[data-index]")
+		val pagesFromHtml = doc.select("div.comic-images-wrapper img, div.chapter-images img, img[data-index]")
 			.mapNotNull { img ->
 				val imageUrl = img.attr("data-src").ifEmpty { img.src() }
 				if (imageUrl?.isNotBlank() == true && !imageUrl.startsWith("data:image")) {
@@ -375,6 +375,57 @@ internal class Azoramoon(context: MangaLoaderContext) :
 				}
 			}
 			.distinct()
+
+		// If 3 or fewer images found, try sequential loading
+		if (pagesFromHtml.size <= 3 && pagesFromHtml.isNotEmpty()) {
+			val firstImageUrl = pagesFromHtml.first().url
+			return loadSequentialImages(firstImageUrl)
+		}
+
+		return pagesFromHtml
+	}
+
+	private suspend fun loadSequentialImages(firstImageUrl: String): List<MangaPage> {
+		// Extract base path and extension from first image
+		// Example: https://storage.azoramoon.com/WP-manga/data/manga_60a9129fe76b4/d252f792717918efa30e59da7057b69b/01.jpg
+		val lastSlashIndex = firstImageUrl.lastIndexOf('/')
+		val basePath = firstImageUrl.substring(0, lastSlashIndex + 1)
+		val fileName = firstImageUrl.substring(lastSlashIndex + 1)
+		val extensionIndex = fileName.lastIndexOf('.')
+		val extension = fileName.substring(extensionIndex)
+
+		val pages = mutableListOf<MangaPage>()
+		var imageIndex = 1
+
+		while (imageIndex <= 200) {
+			// Format number as 01, 02, 03, etc. (2 digits with leading zero)
+			val numberStr = imageIndex.toString().padStart(2, '0')
+			val imageUrl = "$basePath$numberStr$extension"
+
+			try {
+				val response = webClient.httpHead(imageUrl)
+				if (response.isSuccessful) {
+					pages.add(
+						MangaPage(
+							id = generateUid(imageUrl),
+							url = imageUrl,
+							preview = null,
+							source = source,
+						)
+					)
+				} else if (response.code == 404) {
+					// Stop on first 404
+					break
+				}
+			} catch (e: Exception) {
+				// Stop on any error (including NotFoundException)
+				break
+			}
+
+			imageIndex++
+		}
+
+		return pages
 	}
 
 }
