@@ -84,8 +84,10 @@ jobs:
           embed-description: |
             > ${{ github.event.head_commit.message }}
           embed-color: 3066993
-          embed-footer-icon-url: "https://github.com/${{ github.actor }}.png"
-          embed-footer-text: "${{ github.actor }} | ${{ env.SHORT_SHA }}"
+          embed-author-name: "${{ github.actor }}"
+          embed-author-icon-url: "https://github.com/${{ github.actor }}.png"
+          embed-footer-icon-url: "${{ secrets.PARSERS_THUMBNAIL_URL }}"
+          embed-footer-text: "${{ env.SHORT_SHA }}"
 
       # ===============================
       # ❌ ERROR NOTIFICATION
