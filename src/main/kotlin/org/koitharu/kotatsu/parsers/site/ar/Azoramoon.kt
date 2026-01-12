@@ -355,66 +355,59 @@ internal class Azoramoon(context: MangaLoaderContext) :
 		return chaptersMap.values.sortedBy { it.number }
 	}
 
-	override suspend fun getPages(chapter: MangaChapter): List<MangaPage> {
-		val fullUrl = chapter.url.toAbsoluteUrl(domain)
-		val doc = webClient.httpGet(fullUrl).parseHtml()
+    override suspend fun getPages(chapter: MangaChapter): List<MangaPage> {
+        val fullUrl = chapter.url.toAbsoluteUrl(domain)
+        val doc = webClient.httpGet(fullUrl).parseHtml()
 
-		// Try to extract images from JSON data in script tag
-		val scriptContent = doc.select("script:containsData(__next_f.push)").html()
+        val scripts = doc.select("script:containsData(__next_f.push)")
 
-		if (scriptContent.isNotEmpty()) {
-			// Find the "images": array in the JSON
-			val imagesMatch = Regex(""""images":\[(.*?)\]""").find(scriptContent)
-			if (imagesMatch != null) {
-				val imagesJson = "[${imagesMatch.groupValues[1]}]"
+        for (script in scripts) {
+            val scriptContent = script.data()
 
-				try {
-					val imagesArray = JSONArray(imagesJson)
-					val pages = mutableListOf<MangaPage>()
+            if (!scriptContent.contains("\\\"images\\\":")) {
+                continue
+            }
 
-					for (i in 0 until imagesArray.length()) {
-						val imageObj = imagesArray.getJSONObject(i)
-						val imageUrl = imageObj.optString("url")
-						val order = imageObj.optInt("order", i + 1)
+            val imagesMatch = Regex("""\\\"images\\\":\[([\s\S]*?)\],\\\"""").find(scriptContent)
 
-						if (imageUrl.isNotBlank()) {
-							pages.add(
-								MangaPage(
-									id = generateUid(imageUrl),
-									url = imageUrl,
-									preview = null,
-									source = source,
-								)
-							)
-						}
-					}
+            if (imagesMatch != null) {
+                val escapedImagesJson = "[${imagesMatch.groupValues[1]}]"
 
-					if (pages.isNotEmpty()) {
-						return pages.sortedBy { it.url }
-					}
-				} catch (e: Exception) {
-					// If JSON parsing fails, fall back to HTML parsing
-				}
-			}
-		}
+                val imagesJson = escapedImagesJson
+                    .replace("\\\\", "\u0000")
+                    .replace("\\\"", "\"")
+                    .replace("\u0000", "\\")
 
-		// Fallback: Try HTML parsing
-		return doc.select("div.comic-images-wrapper img, div.chapter-images img, img[data-index]")
-			.mapNotNull { img ->
-				val imageUrl = img.attr("data-src").ifEmpty { img.src() }
-				if (imageUrl?.isNotBlank() == true && !imageUrl.startsWith("data:image")) {
-					val finalUrl = imageUrl.toRelativeUrl(domain)
-					MangaPage(
-						id = generateUid(finalUrl),
-						url = finalUrl,
-						preview = null,
-						source = source,
-					)
-				} else {
-					null
-				}
-			}
-			.distinct()
-	}
+                try {
+                    val imagesArray = JSONArray(imagesJson)
+                    val pages = mutableListOf<MangaPage>()
 
+                    for (i in 0 until imagesArray.length()) {
+                        val imageObj = imagesArray.getJSONObject(i)
+                        val imageUrl = imageObj.optString("url")
+
+                        if (imageUrl.isNotBlank()) {
+                            pages.add(
+                                MangaPage(
+                                    id = generateUid(imageUrl),
+                                    url = imageUrl,
+                                    preview = null,
+                                    source = source,
+                                )
+                            )
+                        }
+                    }
+
+                    if (pages.isNotEmpty()) {
+                        return pages
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    continue
+                }
+            }
+        }
+
+        throw Exception("Failed to extract chapter images from page")
+    }
 }

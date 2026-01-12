@@ -14,5 +14,5 @@ internal class Sasangeyou(context: MangaLoaderContext) :
 		get() = super.filterCapabilities.copy(
 			isTagsExclusionSupported = false,
 		)
-}
-
+  }
+  
