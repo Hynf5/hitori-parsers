@@ -3,8 +3,6 @@ package org.koitharu.kotatsu.parsers.site.en
 import okhttp3.Interceptor
 import okhttp3.Response
 import org.jsoup.nodes.Document
-import org.jsoup.nodes.Element
-import org.koitharu.kotatsu.parsers.Broken
 import org.koitharu.kotatsu.parsers.MangaLoaderContext
 import org.koitharu.kotatsu.parsers.MangaSourceParser
 import org.koitharu.kotatsu.parsers.bitmap.Bitmap
@@ -13,8 +11,6 @@ import org.koitharu.kotatsu.parsers.config.ConfigKey
 import org.koitharu.kotatsu.parsers.core.PagedMangaParser
 import org.koitharu.kotatsu.parsers.model.*
 import org.koitharu.kotatsu.parsers.util.*
-import java.nio.charset.StandardCharsets
-import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.*
 import javax.crypto.Cipher
@@ -22,7 +18,6 @@ import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 import kotlin.math.min
 
-@Broken("Need to work image decrypt")
 @MangaSourceParser("MANGAGO", "Mangago", "en")
 internal class MangagoParser(context: MangaLoaderContext) :
     PagedMangaParser(context, MangaParserSource.MANGAGO, pageSize = 20), Interceptor {
@@ -96,7 +91,6 @@ internal class MangagoParser(context: MangaLoaderContext) :
 
     override suspend fun getListPage(page: Int, order: SortOrder, filter: MangaListFilter): List<Manga> {
         if (!filter.query.isNullOrEmpty()) {
-            // Search by query
             val url = buildString {
                 append("https://")
                 append(domain)
@@ -108,10 +102,8 @@ internal class MangagoParser(context: MangaLoaderContext) :
             return parseMangaList(webClient.httpGet(url).parseHtml())
         }
 
-        // Build URL based on sort order
         val url = when (order) {
             SortOrder.NEWEST -> {
-                // Use list/new for newest
                 buildString {
                     append("https://")
                     append(domain)
@@ -127,39 +119,29 @@ internal class MangagoParser(context: MangaLoaderContext) :
                 }
             }
             else -> {
-                // Use genre for other sort orders
                 buildString {
                     append("https://")
                     append(domain)
                     append("/genre/")
-
-                    // Genres
                     if (filter.tags.isNotEmpty()) {
                         filter.tags.joinTo(this, ",") { it.key }
                     } else {
                         append("all")
                     }
-
                     append("/")
                     append(page)
                     append("/?")
-
-                    // Status filters
                     val states = filter.states
-                    append("f=")
-                    append(if (states.contains(MangaState.FINISHED)) "1" else "0")
-                    append("&o=")
-                    append(if (states.contains(MangaState.ONGOING)) "1" else "0")
-
-                    // Sort order
+                    val showFinished = states.isEmpty() || states.contains(MangaState.FINISHED)
+                    val showOngoing = states.isEmpty() || states.contains(MangaState.ONGOING)
+                    append("f=").append(if (showFinished) "1" else "0")
+                    append("&o=").append(if (showOngoing) "1" else "0")
                     append("&sortby=")
                     when (order) {
                         SortOrder.POPULARITY -> append("view")
                         SortOrder.UPDATED -> append("update_date")
                         else -> append("update_date")
                     }
-
-                    // Excluded genres
                     append("&e=")
                     if (filter.tagsExclude.isNotEmpty()) {
                         filter.tagsExclude.joinTo(this, ",") { it.key }
@@ -276,101 +258,242 @@ internal class MangagoParser(context: MangaLoaderContext) :
                     branch = null,
                     source = source,
                 )
-            }.reversed()
+            }
+            .reversed()
+            .filterDuplicateChapters()
     }
+
+    private fun List<MangaChapter>.filterDuplicateChapters(): List<MangaChapter> {
+        val chapterMap = mutableMapOf<Float, MangaChapter>()
+
+        for (chapter in this) {
+            val chapterNumber = if (chapter.title != null) {
+                extractChapterNumber(chapter.title) ?: chapter.number
+            } else {
+                chapter.number
+            }
+
+            if (!chapterMap.containsKey(chapterNumber)) {
+                chapterMap[chapterNumber] = chapter
+            } else {
+                val existing = chapterMap[chapterNumber]!!
+                val newTitle = chapter.title.orEmpty()
+                val existingTitle = existing.title.orEmpty()
+                val newHasMoreInfo = newTitle.length > existingTitle.length
+
+                if (newHasMoreInfo) {
+                    chapterMap[chapterNumber] = chapter
+                }
+            }
+        }
+
+        return chapterMap.values.toList()
+    }
+
+    private fun extractChapterNumber(title: String): Float? {
+        return try {
+            val regex = Regex("""(?:ch\.?|chapter|vol\.?\s*\d+\s+ch\.?)\s*(\d+(?:\.\d+)?)""", RegexOption.IGNORE_CASE)
+            val match = regex.find(title)
+            match?.groupValues?.get(1)?.toFloat()
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    // Cache for deobfuscated JS to avoid re-fetching in getPageUrl
+    // Map of chapterJsUrl -> Pair(deobfuscatedJS, timestamp)
+    private val jsCache = mutableMapOf<String, Pair<String, Long>>()
+    private val maxCacheTime = 1000 * 60 * 5 // 5 minutes
 
     override suspend fun getPages(chapter: MangaChapter): List<MangaPage> {
         val fullUrl = chapter.url.toAbsoluteUrl(domain)
         val doc = webClient.httpGet(fullUrl).parseHtml()
 
-        // Check if mobile view
-        if (doc.select("div.controls ul#dropdown-menu-page").isNotEmpty()) {
-            return parseMobilePages(doc)
+        // Check for mobile mode FIRST (like Mihon does)
+        // Mobile mode has a page dropdown - images load 5 at a time per batch
+        val pageDropdown = doc.select("div.controls ul#dropdown-menu-page")
+        if (pageDropdown.isNotEmpty()) {
+            val pagesCount = pageDropdown.select("li").size
+
+            // Detect URL format and build batch URL generator
+            // Format 1: .../chapter/xxx/yyy/1/ -> .../chapter/xxx/yyy/6/
+            // Format 2: .../pg-1/ -> .../pg-6/
+            // Note: Large numbers (like 2115696) are chapter IDs, not page numbers
+            val cleanUrl = fullUrl.removeSuffix("/")
+            val lastSegment = cleanUrl.substringAfterLast("/")
+
+            val isPgFormat = lastSegment.startsWith("pg-")
+            // Only treat as page number if it's a small number (< 1000), large numbers are chapter IDs
+            val pageNumber = lastSegment.toIntOrNull()
+            val isPageNumber = pageNumber != null && pageNumber < 1000
+
+            val baseUrl: String
+            val buildBatchUrl: (Int) -> String
+
+            if (isPgFormat) {
+                // Format: .../pg-1/ -> extract base and use pg-N
+                baseUrl = cleanUrl.substringBeforeLast("/")
+                buildBatchUrl = { batchNum -> "$baseUrl/pg-$batchNum/" }
+            } else if (isPageNumber) {
+                // URL ends with a small page number, replace it
+                baseUrl = cleanUrl.substringBeforeLast("/")
+                buildBatchUrl = { batchNum -> "$baseUrl/$batchNum/" }
+            } else {
+                // No page number in URL (last segment is chapter ID or text), append /N/
+                baseUrl = cleanUrl
+                buildBatchUrl = { batchNum -> "$baseUrl/$batchNum/" }
+            }
+
+            // Mobile mode loads images in batches of 5
+            // We need to fetch each batch URL to get all images
+            val batchSize = 5
+            val allImages = mutableListOf<String>()
+            var batchStart = 1
+
+            // Get JS and cols from the first document for descrambling
+            val js = getDeobfuscatedJS(doc)
+            val cols = getColsFromDoc(doc) ?: ""
+
+            while (allImages.size < pagesCount) {
+                val batchUrl = buildBatchUrl(batchStart)
+                val batchDoc = if (batchStart == 1) doc else webClient.httpGet(batchUrl).parseHtml()
+                val batchImages = decryptImageList(batchDoc, batchUrl)
+
+                if (batchImages.isEmpty()) {
+                    break
+                }
+
+                allImages.addAll(batchImages)
+                batchStart += batchSize
+
+                // Safety check to prevent infinite loops
+                if (batchStart > pagesCount + batchSize) {
+                    break
+                }
+            }
+
+            // Return pages with resolved image URLs
+            return allImages.take(pagesCount).mapIndexed { index, imageUrl ->
+                val url = if (imageUrl.contains("cspiclink") && js != null) {
+                    val descramblingKey = getDescramblingKey(js, imageUrl)
+                    "$imageUrl#desckey=$descramblingKey&cols=$cols"
+                } else {
+                    imageUrl
+                }
+
+                MangaPage(
+                    id = generateUid("$fullUrl-$index"),
+                    url = url,
+                    preview = null,
+                    source = source,
+                )
+            }
         }
 
-        // Desktop view with encrypted images
+        // Desktop mode - all images are in imgsrcs, decrypt them all at once
         val imgsrcsScript = doc.selectFirst("script:containsData(imgsrcs)")?.html()
-            ?: throw Exception("Could not find imgsrcs script")
+
+        if (imgsrcsScript != null) {
+            val images = decryptImageList(doc, fullUrl)
+            val cols = getColsFromDoc(doc) ?: ""
+            val js = getDeobfuscatedJS(doc) ?: throw Exception("Could not get JS")
+
+            return images.mapIndexed { index, imageUrl ->
+                val url = if (imageUrl.contains("cspiclink")) {
+                    val descramblingKey = getDescramblingKey(js, imageUrl)
+                    "$imageUrl#desckey=$descramblingKey&cols=$cols"
+                } else {
+                    imageUrl
+                }
+
+                if (url.isBlank()) {
+                    throw Exception("Final image URL at index $index is blank after processing")
+                }
+
+                MangaPage(
+                    id = generateUid("$fullUrl-$index"),
+                    url = url,
+                    preview = null,
+                    source = source,
+                )
+            }
+        }
+
+        throw Exception("Could not find pages")
+    }
+
+    override suspend fun getPageUrl(page: MangaPage): String {
+        // URLs are already resolved in getPages() for both desktop and mobile modes
+        if (page.url.isBlank()) {
+            throw Exception("Page URL is blank in getPageUrl")
+        }
+        return page.url
+    }
+
+    override suspend fun getRelatedManga(seed: Manga): List<Manga> = emptyList()
+
+    // --- Decryption & Helper Functions ---
+
+    private suspend fun decryptImageList(doc: Document, sourceUrl: String): List<String> {
+        val imgsrcsScript = doc.selectFirst("script:containsData(imgsrcs)")?.html()
+            ?: throw Exception("Could not find imgsrcs")
 
         val imgsrcRaw = IMG_SRCS_REGEX.find(imgsrcsScript)?.groupValues?.get(1)
             ?: throw Exception("Could not extract imgsrcs")
 
         val imgsrcs = context.decodeBase64(imgsrcRaw)
 
-        // Get chapter.js URL
-        val chapterJsUrl = doc.select("script[src*=chapter.js]").firstOrNull()?.absUrl("src")
-            ?: throw Exception("Could not find chapter.js")
+        val deobfChapterJs = getDeobfuscatedJS(doc) ?: throw Exception("Could not deobfuscate JS")
 
-        // Download and deobfuscate chapter.js
-        val obfuscatedChapterJs = webClient.httpGet(chapterJsUrl).parseRaw()
-        val deobfChapterJs = deobfuscateSoJsonV4(obfuscatedChapterJs)
-
-        // Extract AES key and IV
         val key = findHexEncodedVariable(deobfChapterJs, "key").decodeHex()
         val iv = findHexEncodedVariable(deobfChapterJs, "iv").decodeHex()
 
-        // Decrypt image list
-        val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
+        val cipher = Cipher.getInstance("AES/CBC/NoPadding")
         val keySpec = SecretKeySpec(key, "AES")
         cipher.init(Cipher.DECRYPT_MODE, keySpec, IvParameterSpec(iv))
         val decryptedBytes = cipher.doFinal(imgsrcs)
 
-        // Remove zero padding
         var imageList = String(decryptedBytes, Charsets.UTF_8).trimEnd('\u0000')
-
-        // Unscramble image list
         imageList = unscrambleImageList(imageList, deobfChapterJs)
 
-        // Extract columns for descrambling
-        val cols = COLS_REGEX.find(deobfChapterJs)?.groupValues?.get(1) ?: ""
-
-        // Build page list
-        return imageList.split(",").mapIndexed { index, imageUrl ->
-            val url = if (imageUrl.contains("cspiclink")) {
-                val descramblingKey = getDescramblingKey(deobfChapterJs, imageUrl)
-                "$imageUrl#desckey=$descramblingKey&cols=$cols"
-            } else {
-                imageUrl
+        return imageList.split(",")
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .map { url ->
+                // Hostnames with underscores (e.g., iweb_5.mangapicgallery.com) cause SSL errors on Android
+                // Use HTTP instead to bypass the issue
+                if (url.startsWith("https://") && url.contains("/_") || url.contains("https://iweb_")) {
+                    url.replaceFirst("https://", "http://")
+                } else {
+                    url
+                }
             }
-
-            MangaPage(
-                id = generateUid("$fullUrl-$index"),
-                url = url,
-                preview = null,
-                source = source,
-            )
-        }
     }
 
-    private fun parseMobilePages(doc: Document): List<MangaPage> {
-        val pagesCount = doc.select("div.controls ul#dropdown-menu-page li").size
-        val pageUrl = doc.location().removeSuffix("/").substringBeforeLast("-")
+    private suspend fun getDeobfuscatedJS(doc: Document): String? {
+        val chapterJsUrl = doc.select("script[src*=chapter.js]").firstOrNull()?.absUrl("src") ?: return null
 
-        return (1..pagesCount).map { pageNum ->
-            MangaPage(
-                id = generateUid("$pageUrl-$pageNum"),
-                url = "$pageUrl-$pageNum/",
-                preview = null,
-                source = source,
-            )
-        }
-    }
-
-    override suspend fun getPageUrl(page: MangaPage): String {
-        // Check if it's a mobile page URL (relative URL without protocol)
-        if (page.url.contains("/pg-")) {
-            val doc = webClient.httpGet(page.url.toAbsoluteUrl(domain)).parseHtml()
-            return doc.selectFirst("div#viewer img")?.absUrl("src")
-                ?: throw Exception("Could not find image")
+        val now = System.currentTimeMillis()
+        val cached = jsCache[chapterJsUrl]
+        if (cached != null && now - cached.second < maxCacheTime) {
+            return cached.first
         }
 
-        // Desktop image URL - return as is (fragment contains descrambling parameters)
-        return page.url
+        val obfuscatedChapterJs = webClient.httpGet(chapterJsUrl).parseRaw()
+        val deobf = deobfuscateSoJsonV4(obfuscatedChapterJs)
+
+        jsCache[chapterJsUrl] = Pair(deobf, now)
+        return deobf
     }
 
-    override suspend fun getRelatedManga(seed: Manga): List<Manga> = emptyList()
+    private fun getColsFromDoc(doc: Document): String? {
+        // Get cols from cached JS for the current chapter's script URL
+        val chapterJsUrl = doc.select("script[src*=chapter.js]").firstOrNull()?.absUrl("src")
+        val cached = if (chapterJsUrl != null) jsCache[chapterJsUrl] else null
+        val js = cached?.first ?: return null
+        return COLS_REGEX.find(js)?.groupValues?.get(1)
+    }
 
-    // Interceptor for image descrambling
     override fun intercept(chain: Interceptor.Chain): Response {
         val response = chain.proceed(chain.request())
         val fragment = response.request.url.fragment
@@ -420,11 +543,17 @@ internal class MangagoParser(context: MangaLoaderContext) :
         return result
     }
 
-    // Helper methods for decryption and descrambling
-
     private fun deobfuscateSoJsonV4(jsf: String): String {
         if (!jsf.startsWith("['sojson.v4']")) {
-            throw Exception("Obfuscated code is not sojson.v4")
+            // If it's not sojson.v4, maybe it's already deobfuscated or a different obfuscation?
+            // Based on Mihon code, it expects sojson.v4
+            // If the site changed, this might crash, but we try to parse as is or throw
+            // For now, let's assume if it starts differently, it might not need deobfuscation or format changed.
+            // But given the error, we should stick to the logic.
+            // If the format changed, this regex logic might need update.
+            // However, let's return the string if it looks like JS code?
+            // For safety, throw if header mismatch to alert user.
+            throw Exception("Obfuscated code header mismatch. Expected sojson.v4")
         }
 
         val splitRegex = Regex("[a-zA-Z]+")
@@ -446,24 +575,39 @@ internal class MangagoParser(context: MangaLoaderContext) :
 
     private fun unscrambleImageList(imageList: String, js: String): String {
         var imgList = imageList
-        try {
-            val keyLocations = KEY_LOCATION_REGEX.findAll(js)
-                .map { it.groupValues[1].toInt() }
-                .distinct()
-                .toList()
 
-            val unscrambleKey = keyLocations.map {
-                imgList[it].toString().toInt()
-            }
+        val keyLocations = KEY_LOCATION_REGEX.findAll(js)
+            .map { it.groupValues[1].toInt() }
+            .distinct()
+            .sorted()
+            .toList()
 
-            keyLocations.forEachIndexed { idx, it ->
-                imgList = imgList.removeRange(it - idx..it - idx)
-            }
-
-            imgList = imgList.unscramble(unscrambleKey)
-        } catch (e: NumberFormatException) {
-            // List is already unscrambled
+        if (keyLocations.isEmpty()) {
+            return imgList
         }
+
+        // Try to extract the unscramble key by parsing characters at key locations as integers.
+        // If any character is NOT a digit, it means the image list is already unscrambled.
+        val unscrambleKey = try {
+            keyLocations.map { loc ->
+                if (loc >= imgList.length) {
+                    throw NumberFormatException("Position $loc is beyond string length")
+                }
+                // This will throw NumberFormatException if the character is not a digit
+                imgList[loc].toString().toInt()
+            }
+        } catch (e: NumberFormatException) {
+            // Characters at key positions are not digits, meaning the list is already unscrambled
+            return imgList
+        }
+
+        // Remove characters at key positions, accounting for index shifts
+        keyLocations.forEachIndexed { idx, loc ->
+            imgList = imgList.removeRange((loc - idx)..(loc - idx))
+        }
+
+        imgList = imgList.unscramble(unscrambleKey)
+
         return imgList
     }
 
@@ -472,35 +616,53 @@ internal class MangagoParser(context: MangaLoaderContext) :
         keys.reversed().forEach { key ->
             for (i in s.length - 1 downTo key) {
                 if (i % 2 != 0) {
-                    val temp = s[i - key]
-                    s = s.replaceRange(i - key..i - key, s[i].toString())
-                    s = s.replaceRange(i..i, temp.toString())
+                    val sourceIdx = i - key
+                    if (sourceIdx >= 0) {
+                        val temp = s[sourceIdx]
+                        s = s.substring(0, sourceIdx) + s[i] + s.substring(sourceIdx + 1)
+                        s = s.substring(0, i) + temp + s.substring(i + 1)
+                    }
                 }
             }
         }
         return s
     }
 
-    private fun getDescramblingKey(deobfChapterJs: String, imageUrl: String): String {
-        // Extract the key generation logic from the deobfuscated JavaScript
+    private suspend fun getDescramblingKey(deobfChapterJs: String, imageUrl: String): String {
         val imgkeys = deobfChapterJs
             .substringAfter("var renImg = function(img,width,height,id){", "")
             .substringBefore("key = key.split(", "")
+            .split("\n")
+            .filter { line -> JS_FILTERS.none { filter -> line.contains(filter) } }
+            .joinToString("\n")
+            .replace("img.src", "url")
 
         if (imgkeys.isEmpty()) {
-            return ""
+            throw Exception("Failed to extract image key extraction code from chapter.js")
         }
 
-        // Parse the JavaScript to extract the descrambling key
-        // This is a simplified version - the full implementation would need JS evaluation
-        // For now, return empty string which means images won't be descrambled
-        // but will still load (they'll just be scrambled)
-        return ""
+        val js = """
+            function replacePos(strObj, pos, replacetext) {
+                var str = strObj.substr(0, pos) + replacetext + strObj.substring(pos + 1, strObj.length);
+                return str;
+            }
+            function getDescramblingKey(url) { $imgkeys; return key; }
+            getDescramblingKey("$imageUrl");
+        """.trimIndent()
+
+        val result = context.evaluateJs("https://$domain/", js, 10000L)
+
+        if (result.isNullOrEmpty()) {
+            throw Exception("Failed to evaluate JavaScript to get descrambling key. The image format or site structure may have changed.")
+        }
+
+        return result
     }
 
-    companion object {
+    private companion object {
         private val IMG_SRCS_REGEX = Regex("""var imgsrcs\s*=\s*['"]([a-zA-Z0-9+=/]+)['"]""")
         private val COLS_REGEX = Regex("""var\s*widthnum\s*=\s*heightnum\s*=\s*(\d+);""")
         private val KEY_LOCATION_REGEX = Regex("""str\.charAt\(\s*(\d+)\s*\)""")
+        private val JS_FILTERS = listOf("jQuery", "document", "getContext", "toDataURL", "getImageData", "width", "height")
     }
 }

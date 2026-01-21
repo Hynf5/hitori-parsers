@@ -27,6 +27,7 @@ internal abstract class NineMangaParser(
     override fun onCreateConfig(keys: MutableCollection<ConfigKey<*>>) {
         super.onCreateConfig(keys)
         keys.add(userAgentKey)
+        keys.add(ConfigKey.DisableUpdateChecking(defaultValue = true))
     }
 
     init {
