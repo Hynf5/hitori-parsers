@@ -51,14 +51,24 @@ internal class Komikcast(context: MangaLoaderContext) :
 		val url = buildString {
 			append("https://")
 			append(domain)
-			append("/series?page=")
-			append(page + 1)
-			append("&take=")
-			append(if (filter.query.isNullOrEmpty()) pageSize else searchPageSize)
-			append("&takeChapter=2")
-			append("&includeMeta=true")
+			append("/series")
 
-			if (filter.query.isNullOrEmpty()) {
+			if (!filter.query.isNullOrEmpty()) {
+				// Search uses a simple filter URL
+				append("?filter=title=like=\"")
+				append(filter.query)
+				append("\",nativeTitle=like=\"")
+				append(filter.query)
+				append("\"")
+			} else {
+				// Normal listing with pagination
+				append("?page=")
+				append(page + 1)
+				append("&take=")
+				append(pageSize)
+				append("&takeChapter=2")
+				append("&includeMeta=true")
+
 				filter.types.oneOrThrowIfMany()?.let { contentType ->
 					append("&type=")
 					append(when (contentType) {
@@ -84,27 +94,6 @@ internal class Komikcast(context: MangaLoaderContext) :
 							else -> ""
 						})
 					}
-				}
-			} else {
-				append("&filter=title=like=\"")
-				append(filter.query.urlEncoded())
-				append("\",nativeTitle=like=\"")
-				append(filter.query.urlEncoded())
-				append("\"")
-
-				filter.types.oneOrThrowIfMany()?.let { contentType ->
-					append("&type=")
-					append(when (contentType) {
-						ContentType.MANGA -> "manga"
-						ContentType.MANHWA -> "manhwa"
-						ContentType.MANHUA -> "manhua"
-						else -> ""
-					})
-				}
-
-				filter.tags.takeIf { it.isNotEmpty() }?.let { tags ->
-					append("&genreIds=")
-					append(tags.joinToString(",") { it.title })
 				}
 			}
 		}
