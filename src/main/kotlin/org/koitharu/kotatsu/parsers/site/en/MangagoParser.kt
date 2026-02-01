@@ -232,11 +232,18 @@ internal class MangagoParser(context: MangaLoaderContext) :
         )
     }
 
+    private data class ChapterParseData(
+        val name: String,
+        val url: String,
+        val dateUpload: Long,
+        val scanlator: String?,
+    )
+
     private fun parseChapterList(doc: Document): List<MangaChapter> {
-        return doc.select("table#chapter_table > tbody > tr, table.uk-table > tbody > tr")
-            .mapIndexedNotNull { index, element ->
-                val link = element.selectFirst("a.chico") ?: return@mapIndexedNotNull null
-                val url = link.attrAsAbsoluteUrlOrNull("href") ?: return@mapIndexedNotNull null
+        val rawChapters = doc.select("table#chapter_table > tbody > tr, table.uk-table > tbody > tr")
+            .mapNotNull { element ->
+                val link = element.selectFirst("a.chico") ?: return@mapNotNull null
+                val url = link.attrAsAbsoluteUrlOrNull("href") ?: return@mapNotNull null
                 val name = link.text().trim()
 
                 val dateText = element.select("td:last-child").text().trim()
@@ -247,47 +254,101 @@ internal class MangagoParser(context: MangaLoaderContext) :
                 val scanlator = element.selectFirst("td.no a, td.uk-table-shrink a")?.text()?.trim()
                     ?.ifEmpty { null }
 
-                MangaChapter(
-                    id = generateUid(url),
-                    url = url,
-                    title = name,
-                    number = index + 1f,
-                    volume = 0,
-                    uploadDate = dateUpload,
-                    scanlator = scanlator,
-                    branch = null,
-                    source = source,
-                )
+                ChapterParseData(name, url, dateUpload, scanlator)
             }
             .reversed()
-            .filterDuplicateChapters()
+
+        return buildChapterList(rawChapters)
     }
 
-    private fun List<MangaChapter>.filterDuplicateChapters(): List<MangaChapter> {
-        val chapterMap = mutableMapOf<Float, MangaChapter>()
+    private fun buildChapterList(chapters: List<ChapterParseData>): List<MangaChapter> {
+        // Count scanlator occurrences to determine the most common one
+        val scanlatorCounts = mutableMapOf<String, Int>()
+        for (chapter in chapters) {
+            val scanlator = chapter.scanlator ?: extractTitleSuffix(chapter.name) ?: continue
+            scanlatorCounts[scanlator] = (scanlatorCounts[scanlator] ?: 0) + 1
+        }
+        val preferredScanlator = scanlatorCounts.maxByOrNull { it.value }?.key
 
-        for (chapter in this) {
-            val chapterNumber = if (chapter.title != null) {
-                extractChapterNumber(chapter.title) ?: chapter.number
-            } else {
-                chapter.number
-            }
+        val regularChapters = mutableMapOf<Float, ChapterParseData>()
+        val specialChapters = mutableListOf<ChapterParseData>()
 
-            if (!chapterMap.containsKey(chapterNumber)) {
-                chapterMap[chapterNumber] = chapter
-            } else {
-                val existing = chapterMap[chapterNumber]!!
-                val newTitle = chapter.title.orEmpty()
-                val existingTitle = existing.title.orEmpty()
-                val newHasMoreInfo = newTitle.length > existingTitle.length
+        for (chapter in chapters) {
+            val chapterNum = extractChapterNumber(chapter.name)
+            if (chapterNum != null) {
+                val existing = regularChapters[chapterNum]
+                if (existing == null) {
+                    regularChapters[chapterNum] = chapter
+                } else {
+                    // Prefer the chapter from the most common scanlator for consistency
+                    val existingSource = existing.scanlator ?: extractTitleSuffix(existing.name)
+                    val newSource = chapter.scanlator ?: extractTitleSuffix(chapter.name)
 
-                if (newHasMoreInfo) {
-                    chapterMap[chapterNumber] = chapter
+                    val existingIsPreferred = existingSource == preferredScanlator
+                    val newIsPreferred = newSource == preferredScanlator
+
+                    if (newIsPreferred && !existingIsPreferred) {
+                        regularChapters[chapterNum] = chapter
+                    } else if (!newIsPreferred && existingIsPreferred) {
+                        // Keep existing
+                    } else {
+                        // Same source priority, prefer longer title
+                        if (chapter.name.length > existing.name.length) {
+                            regularChapters[chapterNum] = chapter
+                        }
+                    }
                 }
+            } else {
+                // Non-standard chapters (Special, Extra, etc.) go to special list
+                specialChapters.add(chapter)
             }
         }
 
-        return chapterMap.values.toList()
+        val result = mutableListOf<MangaChapter>()
+
+        // Add regular chapters sorted by number
+        val sortedRegular = regularChapters.entries.sortedBy { it.key }
+        for ((chapterNum, chapter) in sortedRegular) {
+            result.add(
+                MangaChapter(
+                    id = generateUid(chapter.url),
+                    url = chapter.url,
+                    title = chapter.name,
+                    number = chapterNum,
+                    volume = 0,
+                    uploadDate = chapter.dateUpload,
+                    scanlator = chapter.scanlator,
+                    branch = null,
+                    source = source,
+                ),
+            )
+        }
+
+        // Add special chapters at the end with high numbers
+        val baseSpecialNumber = (regularChapters.keys.maxOrNull() ?: 0f) + 10000f
+        for ((index, chapter) in specialChapters.withIndex()) {
+            result.add(
+                MangaChapter(
+                    id = generateUid(chapter.url),
+                    url = chapter.url,
+                    title = chapter.name,
+                    number = baseSpecialNumber + index,
+                    volume = 0,
+                    uploadDate = chapter.dateUpload,
+                    scanlator = chapter.scanlator,
+                    branch = null,
+                    source = source,
+                ),
+            )
+        }
+
+        return result
+    }
+
+    private fun extractTitleSuffix(title: String): String? {
+        // Extract suffix like "Official" from "Ch.40 : Official" or "Good Translations" from "Ch.41 : Good Translations"
+        val regex = Regex("""(?:ch\.?|chapter)\s*\d+(?:\.\d+)?\s*[:\-]\s*(.+)""", RegexOption.IGNORE_CASE)
+        return regex.find(title)?.groupValues?.get(1)?.trim()?.takeIf { it.isNotEmpty() }
     }
 
     private fun extractChapterNumber(title: String): Float? {
