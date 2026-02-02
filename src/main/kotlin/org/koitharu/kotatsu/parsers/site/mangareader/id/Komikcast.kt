@@ -178,6 +178,7 @@ internal class Komikcast(context: MangaLoaderContext) :
 
 	override fun getRequestHeaders() = super.getRequestHeaders().newBuilder()
 		.add("Referer", "https://v1.komikcast.fit/")
+        .add("Origin", "https://v1.komikcast.fit")
 		.build()
 
 	private suspend fun fetchGenreMap(): Map<String, MangaTag> {
