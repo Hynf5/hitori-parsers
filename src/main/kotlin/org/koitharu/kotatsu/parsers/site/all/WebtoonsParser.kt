@@ -58,8 +58,8 @@ internal abstract class WebtoonsParser(
 			else -> tag
 		}
 
-	private suspend fun fetchEpisodes(titleNo: Long): List<MangaChapter> {
-		val url = "https://$mobileApiDomain/api/v1/webtoon/$titleNo/episodes?pageSize=99999"
+	private suspend fun fetchEpisodes(titleNo: Long, type: String): List<MangaChapter> {
+		val url = "https://$mobileApiDomain/api/v1/$type/$titleNo/episodes?pageSize=99999"
 		val json = webClient.httpGet(url).parseJson()
 
 		val episodeList = json.optJSONObject("result")?.optJSONArray("episodeList")
@@ -126,7 +126,8 @@ internal abstract class WebtoonsParser(
 			else -> null
 		}
 
-		val chapters = async { fetchEpisodes(titleNo) }.await()
+		val type = if ("/canvas/" in detailsUrl) "canvas" else "webtoon"
+		val chapters = async { fetchEpisodes(titleNo, type) }.await()
 
 		Manga(
 			id = generateUid(titleNo),
