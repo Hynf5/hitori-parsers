@@ -138,7 +138,8 @@ internal class MangakakalotTv(context: MangaLoaderContext) :
     override suspend fun getDetails(manga: Manga): Manga = coroutineScope {
         val fullUrl = manga.url.toAbsoluteUrl(domain)
         val doc = webClient.httpGet(fullUrl).parseHtml()
-        val chaptersDeferred = async { getChapters(doc) }
+        val mangaSlug = manga.url.substringAfter("/manga/").trimEnd('/')
+        val chaptersDeferred = async { fetchChaptersApi(mangaSlug) }
 
         val descElement = doc.selectFirst("div#contentBox")
         descElement?.select("h2")?.remove()
@@ -171,39 +172,50 @@ internal class MangakakalotTv(context: MangaLoaderContext) :
         )
     }
 
-    override suspend fun getChapters(doc: Document): List<MangaChapter> {
-        val dateFormat = SimpleDateFormat("MMM-dd-yyyy HH:mm", Locale.US)
-        return doc.select("div.chapter-list div.row").mapNotNull { row ->
-            val spans = row.select("span")
-            if (spans.isEmpty()) return@mapNotNull null
+    private suspend fun fetchChaptersApi(mangaSlug: String): List<MangaChapter> {
+        val dateFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US)
+        val chapters = mutableListOf<MangaChapter>()
+        var offset = 0
+        val limit = 50
 
-            val anchor = spans.first()?.selectFirst("a") ?: return@mapNotNull null
-            val url = anchor.attrAsRelativeUrl("href")
-            val name = anchor.text()
+        while (true) {
+            val url = "https://$domain/api/manga/$mangaSlug/chapters?limit=$limit&offset=$offset"
+            val json = webClient.httpGet(url).parseJson()
+            val chaptersArray = json.getJSONObject("data").getJSONArray("chapters")
 
-            val dateText = spans.getOrNull(2)?.attr("title")
-            val date = dateText?.let {
-                try {
-                    dateFormat.parse(it)?.time
+            if (chaptersArray.length() == 0) break
+
+            for (i in 0 until chaptersArray.length()) {
+                val ch = chaptersArray.getJSONObject(i)
+                val chapterSlug = ch.getString("chapter_slug")
+                val chapterUrl = "/manga/$mangaSlug/$chapterSlug"
+
+                val date = try {
+                    dateFormat.parse(ch.getString("updated_at").substringBefore("."))?.time ?: 0L
                 } catch (e: Exception) {
-                    null
+                    0L
                 }
-            } ?: 0L
 
-            val number = Regex("""\d+(\.\d+)?""").findAll(name).lastOrNull()?.value?.toFloatOrNull() ?: -1f
+                chapters.add(
+                    MangaChapter(
+                        id = generateUid(chapterUrl),
+                        title = ch.getString("chapter_name"),
+                        number = ch.getDouble("chapter_num").toFloat(),
+                        volume = 0,
+                        url = chapterUrl,
+                        scanlator = null,
+                        uploadDate = date,
+                        branch = null,
+                        source = source,
+                    ),
+                )
+            }
 
-            MangaChapter(
-                id = generateUid(url),
-                title = name,
-                number = number,
-                volume = 0,
-                url = url,
-                scanlator = null,
-                uploadDate = date,
-                branch = null,
-                source = source
-            )
-        }.reversed()
+            if (chaptersArray.length() < limit) break
+            offset += limit
+        }
+
+        return chapters.sortedBy { it.number }
     }
 
     override suspend fun fetchAvailableTags(): Set<MangaTag> {
