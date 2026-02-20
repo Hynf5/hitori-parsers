@@ -27,6 +27,7 @@ internal abstract class LikeMangaParser(
 	override fun onCreateConfig(keys: MutableCollection<ConfigKey<*>>) {
 		super.onCreateConfig(keys)
 		keys.add(userAgentKey)
+        keys.add(ConfigKey.InterceptCloudflare(defaultValue = true))
 	}
 
 	override val availableSortOrders: Set<SortOrder> =

@@ -136,7 +136,7 @@ internal class Manhwa18Com(context: MangaLoaderContext) :
 					authors = emptySet(),
 					largeCoverUrl = null,
 					description = null,
-					source = MangaParserSource.MANHWA18,
+					source = source,
 				)
 			}
 	}
@@ -185,7 +185,7 @@ internal class Manhwa18Com(context: MangaLoaderContext) :
 					scanlator = null,
 					uploadDate = uploadDate,
 					branch = null,
-					source = MangaParserSource.MANHWA18,
+					source = source,
 				)
 			},
 		)
@@ -222,7 +222,7 @@ internal class Manhwa18Com(context: MangaLoaderContext) :
 				id = generateUid(url),
 				url = url,
 				preview = null,
-				source = MangaParserSource.MANHWA18,
+				source = source,
 			)
 		}
 	}

@@ -46,16 +46,13 @@ internal class Comix(context: MangaLoaderContext) :
         return setOf(
             // Genres
             MangaTag(key = "6", title = "Action", source = source),
-            MangaTag(key = "87264", title = "Adult", source = source),
             MangaTag(key = "7", title = "Adventure", source = source),
             MangaTag(key = "8", title = "Boys Love", source = source),
             MangaTag(key = "9", title = "Comedy", source = source),
             MangaTag(key = "10", title = "Crime", source = source),
             MangaTag(key = "11", title = "Drama", source = source),
-            MangaTag(key = "87265", title = "Ecchi", source = source),
             MangaTag(key = "12", title = "Fantasy", source = source),
             MangaTag(key = "13", title = "Girls Love", source = source),
-            MangaTag(key = "87266", title = "Hentai", source = source),
             MangaTag(key = "14", title = "Historical", source = source),
             MangaTag(key = "15", title = "Horror", source = source),
             MangaTag(key = "16", title = "Isekai", source = source),
@@ -69,7 +66,6 @@ internal class Comix(context: MangaLoaderContext) :
             MangaTag(key = "23", title = "Romance", source = source),
             MangaTag(key = "24", title = "Sci-Fi", source = source),
             MangaTag(key = "25", title = "Slice of Life", source = source),
-            MangaTag(key = "87268", title = "Smut", source = source),
             MangaTag(key = "26", title = "Sports", source = source),
             MangaTag(key = "27", title = "Superhero", source = source),
             MangaTag(key = "28", title = "Thriller", source = source),
@@ -116,8 +112,6 @@ internal class Comix(context: MangaLoaderContext) :
         )
     }
 
-    // kotlin
-    // kotlin
     override suspend fun getListPage(page: Int, order: SortOrder, filter: MangaListFilter): List<Manga> {
         val url = buildString {
             append("https://comix.to/api/v2/manga?")

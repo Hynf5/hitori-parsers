@@ -23,7 +23,7 @@ internal class VioletScans(context: MangaLoaderContext) :
             isSearchSupported = true,
         )
 
-	override val configKeyDomain: ConfigKey.Domain = ConfigKey.Domain("violetscans.com")
+	override val configKeyDomain: ConfigKey.Domain = ConfigKey.Domain("violetscans.org")
 
 	override fun onCreateConfig(keys: MutableCollection<ConfigKey<*>>) {
 		super.onCreateConfig(keys)
