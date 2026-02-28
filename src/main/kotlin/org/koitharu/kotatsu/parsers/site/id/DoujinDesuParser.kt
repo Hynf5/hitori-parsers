@@ -22,6 +22,7 @@ internal class DoujinDesuParser(context: MangaLoaderContext) :
 		keys.add(userAgentKey)
 	}
 
+	// Hack Tombol Sortir jadi Tipe Manga
 	override val availableSortOrders: Set<SortOrder>
 		get() = EnumSet.of(SortOrder.UPDATED, SortOrder.NEWEST, SortOrder.POPULARITY, SortOrder.ALPHABETICAL)
 
@@ -33,11 +34,7 @@ internal class DoujinDesuParser(context: MangaLoaderContext) :
 
 	override suspend fun getFilterOptions() = MangaListFilterOptions(
 		availableTags = fetchAvailableTags(),
-		availableStates = EnumSet.of(
-			MangaState.ONGOING,
-			MangaState.FINISHED,
-		),
-		// Tipe konten bawaan gue matiin biar nggak bentrok sama hack tombol sortir lu
+		availableStates = EnumSet.of(MangaState.ONGOING, MangaState.FINISHED),
 		availableContentTypes = EnumSet.noneOf(ContentType::class.java),
 	)
 
@@ -51,48 +48,47 @@ internal class DoujinDesuParser(context: MangaLoaderContext) :
 			val isGenre = filter.tags.isNotEmpty()
 			val isAuthor = !filter.author.isNullOrBlank()
 
-			// 1. Setup Base Path
+			// 🔥 FIX 1: Format Path Wajib Pakai Trailing Slash (/)
+			var basePath = ""
+
 			if (isGenre) {
-				addPathSegment("genre")
-				filter.tags.oneOrThrowIfMany()?.key?.let {
-					addPathSegment(it.lowercase().splitByWhitespace().joinToString("-"))
-				}
+				val tagSlug = filter.tags.first().key
+				basePath = "genre/$tagSlug/"
 			} else if (isAuthor) {
-				addPathSegment("author")
-				addPathSegment(filter.author!!.lowercase().splitByWhitespace().joinToString("-"))
+				val authorSlug = filter.author!!.lowercase().trim().replace(Regex("\\s+"), "-")
+				basePath = "author/$authorSlug/"
 			} else {
-				addPathSegment("manga")
+				basePath = "manga/"
 			}
 
-			// 2. Setup Pagination
 			if (page > 1) {
-				addPathSegment("page")
-				addPathSegment(page.toString())
+				basePath += "page/$page/"
 			}
 
-			// 3. Pengecekan Query Param
+			// Masukin path yang udah komplit sama garis miringnya
+			addPathSegments(basePath)
+
+			// 🔥 FIX 2: Jangan ganggu halaman Genre/Author pakai Query Parameter!
 			if (!isGenre && !isAuthor) {
 				if (!filter.query.isNullOrBlank()) {
 					addQueryParameter("title", filter.query)
 				}
 
-				// 🔥 HACK MUTLAK: Tombol Sort dibajak jadi Filter Tipe (Manga/Doujin/Manhwa)
 				addQueryParameter(
 					"type",
 					when (order) {
 						SortOrder.UPDATED -> "Manga"
 						SortOrder.NEWEST -> "Doujinshi"
 						SortOrder.POPULARITY -> "Manhwa"
-						SortOrder.ALPHABETICAL -> "" // Munculin semua
+						SortOrder.ALPHABETICAL -> ""
 						else -> "Manga"
 					}
 				)
 
-				// Karena tombol order udah dibajak, kita set default urutan komiknya selalu yang paling baru update aja
 				addQueryParameter("order", "update")
 
 				if (filter.states.isNotEmpty()) {
-					filter.states.oneOrThrowIfMany()?.let {
+					filter.states.firstOrNull()?.let {
 						addQueryParameter(
 							"status",
 							when (it) {
@@ -107,26 +103,29 @@ internal class DoujinDesuParser(context: MangaLoaderContext) :
 		}.build()
 
 		val response = webClient.httpGet(url).parseHtml()
-		return response.select("#archives .entry, section#archives .entry")
-			.mapNotNull {
-				val href = it.selectFirst(".metadata > a")?.attr("href") ?: return@mapNotNull null
-				Manga(
-					id = generateUid(href),
-					title = it.selectFirst(".metadata > a")?.attr("title").orEmpty(),
-					altTitles = emptySet(),
-					url = href,
-					publicUrl = href.toAbsoluteUrl(domain),
-					rating = RATING_UNKNOWN,
-					contentRating = ContentRating.ADULT,
-					coverUrl = it.selectFirst(".thumbnail > img")?.src(),
-					tags = emptySet(),
-					state = null,
-					authors = emptySet(),
-					largeCoverUrl = null,
-					description = null,
-					source = source,
-				)
-			}
+		
+		// 🔥 FIX 3: Perluas Jaring Tangkapan HTML (Biar halaman Genre gak error)
+		val elements = response.select("#archives .entry, section#archives .entry, .entries .entry, .postbody .entry")
+
+		return elements.mapNotNull {
+			val href = it.selectFirst(".metadata > a, a")?.attr("href") ?: return@mapNotNull null
+			Manga(
+				id = generateUid(href),
+				title = it.selectFirst(".metadata > a")?.attr("title") ?: it.selectFirst(".title")?.text() ?: "Unknown",
+				altTitles = emptySet(),
+				url = href,
+				publicUrl = href.toAbsoluteUrl(domain),
+				rating = RATING_UNKNOWN,
+				contentRating = ContentRating.ADULT,
+				coverUrl = it.selectFirst(".thumbnail > img, img")?.src(),
+				tags = emptySet(),
+				state = null,
+				authors = emptySet(),
+				largeCoverUrl = null,
+				description = null,
+				source = source,
+			)
+		}
 	}
 
 	override suspend fun getDetails(manga: Manga): Manga {
@@ -147,8 +146,8 @@ internal class DoujinDesuParser(context: MangaLoaderContext) :
 			rating = metadataEl?.selectFirst(".rating-prc")?.ownText()?.toFloatOrNull()?.div(10f) ?: RATING_UNKNOWN,
 			tags = docs.select(".tags > a").mapToSet {
 				MangaTag(
-					key = it.attr("title"),
-					title = it.text(),
+					key = it.attr("href").trimEnd('/').substringAfterLast('/'), // Ambil slug asli dari URL!
+					title = it.text().trim(),
 					source = source,
 				)
 			},
@@ -196,9 +195,12 @@ internal class DoujinDesuParser(context: MangaLoaderContext) :
 			.selectFirstOrThrow(".entries")
 			.select(".entry > a")
 			.mapToSet {
+				// 🔥 FIX 4: Jangan nebak dari judul, tapi CULIK langsung dari link aslinya
+				val href = it.attr("href")
+				val slug = href.trimEnd('/').substringAfterLast('/')
 				MangaTag(
-					key = it.attr("title"),
-					title = it.attr("title"),
+					key = slug,
+					title = it.text().trim(),
 					source = source,
 				)
 			}
