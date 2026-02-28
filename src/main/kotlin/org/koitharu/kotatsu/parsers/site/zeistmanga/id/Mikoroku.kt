@@ -1,7 +1,5 @@
 package org.koitharu.kotatsu.parsers.site.zeistmanga.id
 
-import org.json.JSONObject
-import org.jsoup.nodes.Document
 import org.koitharu.kotatsu.parsers.MangaLoaderContext
 import org.koitharu.kotatsu.parsers.MangaSourceParser
 import org.koitharu.kotatsu.parsers.exception.ParseException
@@ -24,89 +22,40 @@ internal class Mikoroku(context: MangaLoaderContext) :
         }
     }
 
-    // 🔥 HACK ULTIMATE: Bikin JSON Fetcher Sendiri Tembak ke Mikodrive!
-    override suspend fun loadChapters(mangaUrl: String, doc: Document): List<MangaChapter> {
-        val cleanUrl = mangaUrl.substringBefore("?m=1")
-        val fullUrl = if (cleanUrl.startsWith("http")) cleanUrl else "https://$domain$cleanUrl"
-        val desktopDoc = webClient.httpGet(fullUrl).parseHtml()
+    // KITA HAPUS override loadChapters! 
+    // Biarkan ZeistMangaParser bawaan yang ngerjain tugasnya, karena sistem aslinya udah bener!
 
-        // 1. Ambil URL Label asli dari HTML
-        val tagElement = desktopDoc.selectFirst("a[href*=/search/label/], a[rel=tag]")
-            ?: throw ParseException("Gagal menemukan link label Mikodrive", fullUrl)
-
-        // 2. Ekstrak Label Persis
-        val rawLabelUrl = tagElement.attr("href")
-        val exactLabel = rawLabelUrl.substringAfter("/search/label/").substringBefore("?").substringBefore("&")
-
-        // 3. Tembak API JSON langsung ke MIKODRIVE
-        val apiUrl = "https://www.mikodrive.my.id/feeds/posts/default/-/$exactLabel?alt=json&max-results=999"
-        val jsonResponse = webClient.httpGet(apiUrl).body?.string()
-            ?: throw ParseException("Gagal narik API Mikodrive", apiUrl)
-
-        val json = JSONObject(jsonResponse)
-        val feed = json.optJSONObject("feed")
-        val entries = feed?.optJSONArray("entry")
-
-        if (entries == null || entries.length() == 0) {
-            throw ParseException("API Mikodrive beneran kosong untuk label $exactLabel", apiUrl)
-        }
-
-        val chapters = mutableListOf<MangaChapter>()
-        
-        // 4. Parse JSON Manual dan bikin list Chapter
-        for (i in 0 until entries.length()) {
-            val entry = entries.getJSONObject(i)
-            val titleObj = entry.optJSONObject("title")
-            val title = titleObj?.optString("$" + "t") ?: "Chapter ${i + 1}"
-            
-            var chapterUrl = ""
-            val links = entry.optJSONArray("link")
-            if (links != null) {
-                for (j in 0 until links.length()) {
-                    val link = links.getJSONObject(j)
-                    if (link.optString("rel") == "alternate") {
-                        chapterUrl = link.optString("href")
-                        break
-                    }
-                }
-            }
-
-            chapterUrl = chapterUrl.substringBefore("?m=1")
-                .removePrefix("https://www.mikodrive.my.id")
-                .removePrefix("http://www.mikodrive.my.id")
-
-            chapters.add(
-                MangaChapter(
-                    id = i.toLong(),
-                    title = title,
-                    number = -1f,
-                    volume = 0,
-                    scanlator = "",     // <-- FIXED: Parameter yang ketinggalan
-                    uploadDate = 0L,    // <-- FIXED: Parameter yang ketinggalan
-                    branch = "",        // <-- FIXED: Parameter yang ketinggalan
-                    url = chapterUrl,
-                    source = source
-                )
-            )
-        }
-
-        return chapters
-    }
-
-    // 🔥 HACK GAMBAR: Nyedot langsung dari div.max-w
+    // 🔥 FOKUS DI getPages: Menangani redirect Javascript dari Mikoroku ke Mikodrive
     override suspend fun getPages(chapter: MangaChapter): List<MangaPage> {
         val fullUrl = if (chapter.url.startsWith("http")) {
-            chapter.url 
+            chapter.url
         } else {
-            "https://www.mikodrive.my.id${chapter.url}"
-        }.substringBefore("?m=1")
+            "https://$domain${chapter.url}"
+        }
 
-        val doc = webClient.httpGet(fullUrl).parseHtml()
+        var doc = webClient.httpGet(fullUrl).parseHtml()
 
-        val images = doc.select("div.max-w img")
+        // 1. Deteksi JavaScript Redirect ke Mikodrive!
+        val scripts = doc.select("script")
+        for (script in scripts) {
+            val data = script.data()
+            if (data.contains("window.location.replace") || data.contains("window.location.href")) {
+                // Ekstrak URL Mikodrive dari dalam script menggunakan Regex
+                val match = Regex("""window\.location\.(?:replace|href)\s*=\s*['"]([^'"]+)['"]""").find(data)
+                if (match != null) {
+                    val redirectUrl = match.groupValues[1]
+                    // Temu! Download ulang halaman tapi sekarang dari URL Mikodrive
+                    doc = webClient.httpGet(redirectUrl).parseHtml()
+                    break
+                }
+            }
+        }
+
+        // 2. Sekarang kita udah ada di Mikodrive, tinggal comot gambarnya dari div.max-w
+        val images = doc.select("div.max-w img, div#readerarea img, div.post-body img")
         
         if (images.isEmpty()) {
-            throw ParseException("Gagal menemukan gambar di kontainer .max-w Mikodrive", fullUrl)
+            throw ParseException("Gagal menemukan gambar komik, pastikan redirect berhasil", fullUrl)
         }
 
         return images.filter { 
