@@ -13,7 +13,7 @@ import org.koitharu.kotatsu.parsers.util.*
 
 @MangaSourceParser("MIKOROKU", "Mikoroku", "id", ContentType.HENTAI)
 internal class Mikoroku(context: MangaLoaderContext) :
-	ZeistMangaParser(context, MangaParserSource.MIKOROKU, "www.mikoroku.my.id") { // Domain diperbarui
+	ZeistMangaParser(context, MangaParserSource.MIKOROKU, "www.mikoroku.my.id") {
 
 	override suspend fun fetchAvailableTags(): Set<MangaTag> {
 		val doc = webClient.httpGet("https://$domain").parseHtml()
@@ -26,30 +26,30 @@ internal class Mikoroku(context: MangaLoaderContext) :
 		}
 	}
 
-	// Override loadChapters murni scraping HTML (Logika Tachiyomi)
 	override suspend fun loadChapters(mangaUrl: String, doc: Document): List<MangaChapter> {
 		val elements = doc.select("div#chapterContainer a.chap-btn")
 		
 		return elements.map { element ->
-			val chapUrl = element.attr("href") // Dibiarkan absolute URL agar sinkron riwayat
+			val chapUrl = element.attr("href") 
 
 			MangaChapter(
 				id = generateUid(chapUrl),
 				title = element.selectFirst(".chap-num")?.text() ?: element.text().trim(),
 				number = -1f,
 				volume = 0,
+				scanlator = null,
+				uploadDate = 0L,
+				branch = null,
 				url = chapUrl,
 				source = source
 			)
 		}.reversed()
 	}
 
-	// Override getPages buat ngelewatin JS Redirect ke Mikodrive
 	override suspend fun getPages(chapter: MangaChapter): List<MangaPage> {
 		val fullUrl = chapter.url.toAbsoluteUrl(domain)
 		var doc = webClient.httpGet(fullUrl).parseHtml()
 
-		// Deteksi kalau ada lemparan link (redirect) ke Mikodrive
 		val redirectScript = doc.selectFirst("script:containsData(window.location.replace), script:containsData(window.location.href)")
 		if (redirectScript != null) {
 			val match = Regex("""window\.location\.(?:replace|href)\s*=\s*['"]([^'"]+)['"]""").find(redirectScript.data())
@@ -58,7 +58,6 @@ internal class Mikoroku(context: MangaLoaderContext) :
 			}
 		}
 
-		// Ambil gambarnya
 		return doc.select("div.separator img, div.max-w img").map { img ->
 			val url = img.attr("data-src").ifEmpty { img.attr("data-lazy-src") }.ifEmpty { img.attr("src") }
 			MangaPage(
