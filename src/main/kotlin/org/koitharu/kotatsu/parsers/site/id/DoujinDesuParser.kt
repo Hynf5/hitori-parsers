@@ -22,21 +22,27 @@ internal class DoujinDesuParser(context: MangaLoaderContext) :
 		keys.add(userAgentKey)
 	}
 
-	// Fitur Urutan / Sorting dikembalikan
+	// 🔥 FIX 1: Idupin lagi semua opsi Sorting biar lu bisa milih di aplikasi
 	override val availableSortOrders: Set<SortOrder>
-		get() = EnumSet.of(SortOrder.UPDATED, SortOrder.NEWEST, SortOrder.ALPHABETICAL, SortOrder.POPULARITY)
+		get() = EnumSet.of(SortOrder.UPDATED, SortOrder.NEWEST, SortOrder.POPULARITY, SortOrder.ALPHABETICAL)
 
 	override val filterCapabilities: MangaListFilterCapabilities
 		get() = MangaListFilterCapabilities(
 			isSearchSupported = true,
 			isAuthorSearchSupported = true,
-			isMultipleTagsSupported = false // Webnya udah gak dukung multi-tag!
 		)
 
 	override suspend fun getFilterOptions() = MangaListFilterOptions(
 		availableTags = fetchAvailableTags(),
-		availableStates = EnumSet.of(MangaState.ONGOING, MangaState.FINISHED),
-		availableContentTypes = EnumSet.of(ContentType.MANGA, ContentType.MANHWA, ContentType.DOUJINSHI),
+		availableStates = EnumSet.of(
+			MangaState.ONGOING,
+			MangaState.FINISHED,
+		),
+		availableContentTypes = EnumSet.of(
+			ContentType.MANGA,
+			ContentType.MANHWA,
+			ContentType.DOUJINSHI,
+		),
 	)
 
 	override fun getRequestHeaders(): Headers = Headers.Builder()
@@ -46,30 +52,29 @@ internal class DoujinDesuParser(context: MangaLoaderContext) :
 
 	override suspend fun getListPage(page: Int, order: SortOrder, filter: MangaListFilter): List<Manga> {
 		val url = urlBuilder().apply {
-			val isGenrePath = filter.tags.isNotEmpty()
-			val isAuthorPath = !filter.author.isNullOrEmpty() && !isGenrePath
+			val isGenre = filter.tags.isNotEmpty()
+			val isAuthor = !filter.author.isNullOrEmpty()
 
-			// 1. Setup Base Path
-			if (isGenrePath) {
+			if (isGenre) {
 				addPathSegment("genre")
-				// Ambil tag pertama aja biar webnya gak 404 kalau user milih banyak tag
-				val tag = filter.tags.first().key.lowercase().splitByWhitespace().joinToString("-")
-				addPathSegment(tag)
-			} else if (isAuthorPath) {
+				filter.tags.oneOrThrowIfMany()?.key?.let { it ->
+					addPathSegment(it.lowercase().splitByWhitespace().joinToString("-") { it })
+				}
+			} else if (isAuthor) {
 				addPathSegment("author")
-				addPathSegment(filter.author!!.lowercase().splitByWhitespace().joinToString("-"))
+				addPathSegment(filter.author.splitByWhitespace().joinToString("-") { it.lowercase() })
 			} else {
 				addPathSegment("manga")
 			}
 
-			// 2. Setup Pagination
 			if (page > 1) {
 				addPathSegment("page")
 				addPathSegment(page.toString())
 			}
 
-			// 🔥 3. PENCEGAHAN 404: Jangan masukin order/title/status ke halaman Genre/Author!
-			if (!isGenrePath && !isAuthorPath) {
+			// 🔥 FIX 2: Masukin parameter Sorting & Search Title HANYA di halaman utama
+			// (Biar gak kena 404 Not Found kayak kemarin pas buka Genre)
+			if (!isGenre && !isAuthor) {
 				if (!filter.query.isNullOrBlank()) {
 					addQueryParameter("title", filter.query)
 				}
@@ -78,14 +83,16 @@ internal class DoujinDesuParser(context: MangaLoaderContext) :
 					"order",
 					when (order) {
 						SortOrder.UPDATED -> "update"
+						SortOrder.NEWEST -> "latest"
 						SortOrder.POPULARITY -> "popular"
 						SortOrder.ALPHABETICAL -> "title"
-						SortOrder.NEWEST -> "latest"
 						else -> "update"
 					}
 				)
+			}
 
-				filter.states.firstOrNull()?.let {
+			if (!filter.states.isEmpty() && filter.author.isNullOrEmpty() && filter.tags.isEmpty()) {
+				filter.states.oneOrThrowIfMany()?.let {
 					addQueryParameter(
 						"status",
 						when (it) {
@@ -95,25 +102,20 @@ internal class DoujinDesuParser(context: MangaLoaderContext) :
 						},
 					)
 				}
+			}
 
-				filter.types.firstOrNull()?.let {
-					addQueryParameter(
-						"type",
-						when (it) {
-							ContentType.MANGA -> "Manga"
-							ContentType.MANHWA -> "Manhwa"
-							ContentType.DOUJINSHI -> "Doujinshi"
-							else -> ""
-						}
-					)
-				}
+			when (filter.types.oneOrThrowIfMany()) {
+				ContentType.MANHWA -> addQueryParameter("type", "Manhwa")
+				ContentType.DOUJINSHI -> addQueryParameter("type", "Doujinshi")
+				else -> addQueryParameter("type", "Manga")
 			}
 		}.build()
 
 		val response = webClient.httpGet(url).parseHtml()
-		
-		return response.select("#archives .entry, section#archives .entry")
-			.mapNotNull {
+		return response.selectFirst("section#archives .entries")
+			?.selectFirst("div.entries")
+			?.select(".entry")
+			?.mapNotNull {
 				val href = it.selectFirst(".metadata > a")?.attr("href") ?: return@mapNotNull null
 				Manga(
 					id = generateUid(href),
@@ -131,7 +133,7 @@ internal class DoujinDesuParser(context: MangaLoaderContext) :
 					description = null,
 					source = source,
 				)
-			}
+			} ?: emptyList()
 	}
 
 	override suspend fun getDetails(manga: Manga): Manga {
@@ -144,7 +146,6 @@ internal class DoujinDesuParser(context: MangaLoaderContext) :
 			else -> null
 		}
 		val author = metadataEl?.selectFirst("tr:contains(Author)")?.selectLast("td")?.text()
-		
 		return manga.copy(
 			authors = setOfNotNull(author),
 			description = docs.selectFirst(".wrapper > .metadata > .pb-2")?.selectFirst("p")?.html(),
@@ -181,7 +182,6 @@ internal class DoujinDesuParser(context: MangaLoaderContext) :
 		val id = webClient.httpGet(chapter.url.toAbsoluteUrl(domain)).parseHtml()
 			.requireElementById("reader")
 			.attr("data-id")
-		
 		return webClient.httpPost("/themes/ajax/ch.php".toAbsoluteUrl(domain), "id=$id").parseHtml()
 			.select("img")
 			.map {
