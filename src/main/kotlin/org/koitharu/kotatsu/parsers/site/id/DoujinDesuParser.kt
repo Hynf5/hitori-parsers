@@ -48,26 +48,26 @@ internal class DoujinDesuParser(context: MangaLoaderContext) :
 			val isGenre = filter.tags.isNotEmpty()
 			val isAuthor = !filter.author.isNullOrBlank()
 
-			// 🔥 FIX PENCARIAN: Pakai parameter akar WordPress (?s=keyword)
 			if (isSearch) {
 				if (page > 1) {
 					addPathSegment("page")
 					addPathSegment(page.toString())
-					addPathSegment("") // Trailing slash wajib
+					addPathSegment("") 
 				}
 				addQueryParameter("s", filter.query)
 				
-				// Hack tipe tetep dimasukin siapa tau tembus buat filter hasil pencarian
-				addQueryParameter(
-					"type",
-					when (order) {
-						SortOrder.UPDATED -> "Manga"
-						SortOrder.NEWEST -> "Doujinshi"
-						SortOrder.POPULARITY -> "Manhwa"
-						SortOrder.ALPHABETICAL -> ""
-						else -> "Manga"
-					}
-				)
+				// Cuma masukin tipe kalau BUKAN Abjad
+				if (order != SortOrder.ALPHABETICAL) {
+					addQueryParameter(
+						"type",
+						when (order) {
+							SortOrder.UPDATED -> "Manga"
+							SortOrder.NEWEST -> "Doujinshi"
+							SortOrder.POPULARITY -> "Manhwa"
+							else -> "Manga"
+						}
+					)
+				}
 			} else if (isGenre) {
 				val tagSlug = filter.tags.first().key
 				addPathSegment("genre")
@@ -97,17 +97,19 @@ internal class DoujinDesuParser(context: MangaLoaderContext) :
 					addPathSegment("")
 				}
 
-				addQueryParameter(
-					"type",
-					when (order) {
-						SortOrder.UPDATED -> "Manga"
-						SortOrder.NEWEST -> "Doujinshi"
-						SortOrder.POPULARITY -> "Manhwa"
-						SortOrder.ALPHABETICAL -> ""
-						else -> "Manga"
-					}
-				)
-				addQueryParameter("order", "update")
+				// 🔥 FIX: Kalau milih Nama/Abjad, biarkan URL bersih (doujindesu.tv/manga/)
+				if (order != SortOrder.ALPHABETICAL) {
+					addQueryParameter(
+						"type",
+						when (order) {
+							SortOrder.UPDATED -> "Manga"
+							SortOrder.NEWEST -> "Doujinshi"
+							SortOrder.POPULARITY -> "Manhwa"
+							else -> "Manga"
+						}
+					)
+					addQueryParameter("order", "update")
+				}
 
 				if (filter.states.isNotEmpty()) {
 					filter.states.firstOrNull()?.let {
@@ -126,7 +128,6 @@ internal class DoujinDesuParser(context: MangaLoaderContext) :
 
 		val response = webClient.httpGet(url).parseHtml()
 		
-		// 🔥 Jaring penangkap HTML diperluas buat nangkep hasil pencarian
 		val elements = response.select("#archives .entry, section#archives .entry, .entries .entry, .postbody .entry, .bsx, .animepost")
 
 		return elements.mapNotNull {
