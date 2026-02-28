@@ -22,7 +22,6 @@ internal class DoujinDesuParser(context: MangaLoaderContext) :
 		keys.add(userAgentKey)
 	}
 
-	// Hack Tombol Sortir jadi Tipe Manga
 	override val availableSortOrders: Set<SortOrder>
 		get() = EnumSet.of(SortOrder.UPDATED, SortOrder.NEWEST, SortOrder.POPULARITY, SortOrder.ALPHABETICAL)
 
@@ -45,33 +44,57 @@ internal class DoujinDesuParser(context: MangaLoaderContext) :
 
 	override suspend fun getListPage(page: Int, order: SortOrder, filter: MangaListFilter): List<Manga> {
 		val url = urlBuilder().apply {
+			val isSearch = !filter.query.isNullOrBlank()
 			val isGenre = filter.tags.isNotEmpty()
 			val isAuthor = !filter.author.isNullOrBlank()
 
-			// 🔥 FIX 1: Format Path Wajib Pakai Trailing Slash (/)
-			var basePath = ""
-
-			if (isGenre) {
+			// 🔥 FIX PENCARIAN: Pakai parameter akar WordPress (?s=keyword)
+			if (isSearch) {
+				if (page > 1) {
+					addPathSegment("page")
+					addPathSegment(page.toString())
+					addPathSegment("") // Trailing slash wajib
+				}
+				addQueryParameter("s", filter.query)
+				
+				// Hack tipe tetep dimasukin siapa tau tembus buat filter hasil pencarian
+				addQueryParameter(
+					"type",
+					when (order) {
+						SortOrder.UPDATED -> "Manga"
+						SortOrder.NEWEST -> "Doujinshi"
+						SortOrder.POPULARITY -> "Manhwa"
+						SortOrder.ALPHABETICAL -> ""
+						else -> "Manga"
+					}
+				)
+			} else if (isGenre) {
 				val tagSlug = filter.tags.first().key
-				basePath = "genre/$tagSlug/"
+				addPathSegment("genre")
+				addPathSegment(tagSlug)
+				addPathSegment("")
+				if (page > 1) {
+					addPathSegment("page")
+					addPathSegment(page.toString())
+					addPathSegment("")
+				}
 			} else if (isAuthor) {
 				val authorSlug = filter.author!!.lowercase().trim().replace(Regex("\\s+"), "-")
-				basePath = "author/$authorSlug/"
+				addPathSegment("author")
+				addPathSegment(authorSlug)
+				addPathSegment("")
+				if (page > 1) {
+					addPathSegment("page")
+					addPathSegment(page.toString())
+					addPathSegment("")
+				}
 			} else {
-				basePath = "manga/"
-			}
-
-			if (page > 1) {
-				basePath += "page/$page/"
-			}
-
-			// Masukin path yang udah komplit sama garis miringnya
-			addPathSegments(basePath)
-
-			// 🔥 FIX 2: Jangan ganggu halaman Genre/Author pakai Query Parameter!
-			if (!isGenre && !isAuthor) {
-				if (!filter.query.isNullOrBlank()) {
-					addQueryParameter("title", filter.query)
+				addPathSegment("manga")
+				addPathSegment("")
+				if (page > 1) {
+					addPathSegment("page")
+					addPathSegment(page.toString())
+					addPathSegment("")
 				}
 
 				addQueryParameter(
@@ -84,7 +107,6 @@ internal class DoujinDesuParser(context: MangaLoaderContext) :
 						else -> "Manga"
 					}
 				)
-
 				addQueryParameter("order", "update")
 
 				if (filter.states.isNotEmpty()) {
@@ -104,20 +126,30 @@ internal class DoujinDesuParser(context: MangaLoaderContext) :
 
 		val response = webClient.httpGet(url).parseHtml()
 		
-		// 🔥 FIX 3: Perluas Jaring Tangkapan HTML (Biar halaman Genre gak error)
-		val elements = response.select("#archives .entry, section#archives .entry, .entries .entry, .postbody .entry")
+		// 🔥 Jaring penangkap HTML diperluas buat nangkep hasil pencarian
+		val elements = response.select("#archives .entry, section#archives .entry, .entries .entry, .postbody .entry, .bsx, .animepost")
 
 		return elements.mapNotNull {
-			val href = it.selectFirst(".metadata > a, a")?.attr("href") ?: return@mapNotNull null
+			val aTag = it.selectFirst(".metadata > a") ?: it.selectFirst("a") ?: return@mapNotNull null
+			val href = aTag.attr("href")
+			
+			val title = it.selectFirst(".metadata > a")?.attr("title") 
+				?: it.selectFirst(".title, .tt")?.text() 
+				?: aTag.attr("title") 
+				?: "Unknown"
+				
+			val coverUrl = it.selectFirst(".thumbnail > img")?.attr("src") 
+				?: it.selectFirst("img")?.attr("src")
+
 			Manga(
 				id = generateUid(href),
-				title = it.selectFirst(".metadata > a")?.attr("title") ?: it.selectFirst(".title")?.text() ?: "Unknown",
+				title = title.trim(),
 				altTitles = emptySet(),
 				url = href,
 				publicUrl = href.toAbsoluteUrl(domain),
 				rating = RATING_UNKNOWN,
 				contentRating = ContentRating.ADULT,
-				coverUrl = it.selectFirst(".thumbnail > img, img")?.src(),
+				coverUrl = coverUrl,
 				tags = emptySet(),
 				state = null,
 				authors = emptySet(),
@@ -146,7 +178,7 @@ internal class DoujinDesuParser(context: MangaLoaderContext) :
 			rating = metadataEl?.selectFirst(".rating-prc")?.ownText()?.toFloatOrNull()?.div(10f) ?: RATING_UNKNOWN,
 			tags = docs.select(".tags > a").mapToSet {
 				MangaTag(
-					key = it.attr("href").trimEnd('/').substringAfterLast('/'), // Ambil slug asli dari URL!
+					key = it.attr("href").trimEnd('/').substringAfterLast('/'),
 					title = it.text().trim(),
 					source = source,
 				)
@@ -195,7 +227,6 @@ internal class DoujinDesuParser(context: MangaLoaderContext) :
 			.selectFirstOrThrow(".entries")
 			.select(".entry > a")
 			.mapToSet {
-				// 🔥 FIX 4: Jangan nebak dari judul, tapi CULIK langsung dari link aslinya
 				val href = it.attr("href")
 				val slug = href.trimEnd('/').substringAfterLast('/')
 				MangaTag(
