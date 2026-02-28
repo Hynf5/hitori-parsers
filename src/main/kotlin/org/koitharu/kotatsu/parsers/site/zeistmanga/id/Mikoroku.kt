@@ -27,7 +27,6 @@ internal class Mikoroku(context: MangaLoaderContext) :
         }
     }
 
-    // 🔥 HACK ULTIMATE: Parser Chapter Mandiri (Membunuh fungsi bawaan ZeistManga)
     override suspend fun loadChapters(mangaUrl: String, doc: Document): List<MangaChapter> {
         val cleanUrl = mangaUrl.substringBefore("?m=1")
         val fullUrl = if (cleanUrl.startsWith("http")) cleanUrl else "https://$domain$cleanUrl"
@@ -35,7 +34,7 @@ internal class Mikoroku(context: MangaLoaderContext) :
 
         val chapters = mutableListOf<MangaChapter>()
 
-        // STRATEGI 1: Nyolong dari HTML DOM (Siapa tau adminnya ngerender chapter di server)
+        // 1. Coba cari kalau ada list chapter HTML biasa
         val domChapters = desktopDoc.select("#chapterlist li a, .eplister li a, .clstyle li a, .list-manga li a")
         if (domChapters.isNotEmpty()) {
             domChapters.forEachIndexed { index, element ->
@@ -54,45 +53,42 @@ internal class Mikoroku(context: MangaLoaderContext) :
                     source = source
                 ))
             }
-            return chapters.reversed() // Kotatsu butuh urutan yang benar
+            return chapters.reversed()
         }
 
-        // STRATEGI 2 & 3: Ekstrak Label Pasti (Anti-Bodoh R18/School Life)
         var exactLabel = ""
         
-        // Target 1: Curi dari atribut data-label bawaan ZeistManga
-        val dataLabelElement = desktopDoc.selectFirst("[data-label]")
-        if (dataLabelElement != null) {
-            exactLabel = dataLabelElement.attr("data-label")
+        // 🔥 TARGET 1: Paling Akurat - Ambil dari link label di dalam H1 (Sesuai HTML lu!)
+        val h1Label = desktopDoc.selectFirst("h1 a[href*=/search/label/]")
+        if (h1Label != null) {
+            val href = h1Label.attr("href")
+            exactLabel = href.substringAfter("/search/label/").substringBefore("?").substringBefore("&")
+            exactLabel = URLDecoder.decode(exactLabel, "UTF-8")
         }
 
-        // Target 2: Curi langsung dari URL API JSON yang nyempil di script
+        // 🔥 TARGET 2: Fallback ke data-label bawaan Zeist
         if (exactLabel.isEmpty()) {
-            val scripts = desktopDoc.select("script")
-            for (script in scripts) {
-                val match = Regex("""/feeds/posts/default/-/([^?'"&]+)""").find(script.data())
-                if (match != null) {
-                    val found = match.groupValues[1]
-                    if (!found.equals("Series", true) && !found.equals("Manga", true)) {
-                        exactLabel = URLDecoder.decode(found, "UTF-8")
-                        break
-                    }
-                }
+            val dataLabelElement = desktopDoc.selectFirst("[data-label]")
+            if (dataLabelElement != null) {
+                exactLabel = dataLabelElement.attr("data-label")
             }
         }
 
-        // Target 3: Fallback ke Judul (H1)
+        // 🔥 TARGET 3: Fallback mentah ke teks H1
         if (exactLabel.isEmpty()) {
-            exactLabel = desktopDoc.selectFirst("h1")?.text()?.trim() ?: ""
+            val h1Text = desktopDoc.selectFirst("h1")?.text()?.trim() ?: ""
+            // Bersihin dari kata " Chapter XX" dll
+            exactLabel = h1Text.substringBefore(" Chapter").substringBefore(" -").trim()
         }
 
-        if (exactLabel.isEmpty()) {
-            throw ParseException("Gagal total nge-ekstrak label dari web Mikoroku", fullUrl)
+        // Cek kalau masih kosong atau dapet kode JS aneh
+        if (exactLabel.isEmpty() || exactLabel.contains("\${")) {
+            throw ParseException("Gagal total nge-ekstrak label valid dari web", fullUrl)
         }
 
         val encodedLabel = URLEncoder.encode(exactLabel, "UTF-8").replace("+", "%20")
         
-        // 🔥 EKSEKUSI API: Coba Mikoroku dulu, kalau kosong kita dobrak Mikodrive!
+        // Tembak API
         var apiUrl = "https://www.mikoroku.my.id/feeds/posts/default/-/$encodedLabel?alt=json&max-results=999"
         var jsonResponse = webClient.httpGet(apiUrl).body?.string()
         var entries = JSONObject(jsonResponse ?: "{}").optJSONObject("feed")?.optJSONArray("entry")
@@ -147,7 +143,6 @@ internal class Mikoroku(context: MangaLoaderContext) :
         return chapters
     }
 
-    // 🔥 HACK GAMBAR: Tangani Javascript Redirect ke Mikodrive
     override suspend fun getPages(chapter: MangaChapter): List<MangaPage> {
         val fullUrl = if (chapter.url.startsWith("http")) {
             chapter.url 
@@ -157,7 +152,6 @@ internal class Mikoroku(context: MangaLoaderContext) :
 
         var doc = webClient.httpGet(fullUrl).parseHtml()
 
-        // Bypass kalau Mikoroku pake Javascript buat pindah ke Mikodrive
         val scripts = doc.select("script")
         for (script in scripts) {
             val data = script.data()
@@ -173,7 +167,6 @@ internal class Mikoroku(context: MangaLoaderContext) :
             }
         }
 
-        // Cari gambar dari berbagai kemungkinan class/id
         val images = doc.select("div.max-w img, div#readerarea img, div.post-body img")
         
         if (images.isEmpty()) {
