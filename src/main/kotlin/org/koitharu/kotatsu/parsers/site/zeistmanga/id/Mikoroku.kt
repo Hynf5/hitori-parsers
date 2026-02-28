@@ -23,31 +23,27 @@ internal class Mikoroku(context: MangaLoaderContext) :
         }
     }
 
-    // 🔥 HACK ULTIMATE: Adaptasi Logika Tachiyomi (Direct HTML Parsing)
     override suspend fun loadChapters(mangaUrl: String, doc: Document): List<MangaChapter> {
         val cleanUrl = mangaUrl.substringBefore("?m=1")
         val fullUrl = if (cleanUrl.startsWith("http")) cleanUrl else "https://$domain$cleanUrl"
         
-        // Ambil halaman HTML manga
         val desktopDoc = webClient.httpGet(fullUrl).parseHtml()
 
-        // SIKAT LANGSUNG pakai selector Tachiyomi!
-        val chapterElements = desktopDoc.select("div#chapterContainer a.chap-btn")
+        val chapterElements = desktopDoc.select("div#chapterContainer a.chap-btn, #chapterlist li a, .eplister li a")
         
         if (chapterElements.isEmpty()) {
-            throw ParseException("Gagal menemukan chapter list dengan selector div#chapterContainer a.chap-btn", fullUrl)
+            throw ParseException("Gagal menemukan chapter list", fullUrl)
         }
 
         val chapters = chapterElements.mapIndexed { index, element ->
-            // Ambil nomor chapter atau teksnya (Sama persis kayak Tachiyomi)
             val title = element.selectFirst(".chap-num")?.text() ?: element.text()
             
-            // Bersihin URL biar Kotatsu nyimpen path-nya dengan bener
             var chapUrl = element.attr("href").substringBefore("?m=1")
+            
+            // PERBAIKAN: HANYA hapus domain mikoroku. 
+            // Kalau linknya mikodrive, biarin aja biar Kotatsu langsung nembak ke sana!
             chapUrl = chapUrl.removePrefix("https://www.mikoroku.my.id")
                              .removePrefix("http://www.mikoroku.my.id")
-                             .removePrefix("https://www.mikodrive.my.id")
-                             .removePrefix("http://www.mikodrive.my.id")
 
             MangaChapter(
                 id = index.toLong(),
@@ -62,22 +58,20 @@ internal class Mikoroku(context: MangaLoaderContext) :
             )
         }
 
-        // Kotatsu butuh dibalik (reversed) karena biasanya HTML nampilin dari yang terbaru di atas
         return chapters.reversed() 
     }
 
-    // 🔥 HACK GAMBAR: Gabungan JS Redirect Kotatsu & Selector Tachiyomi
     override suspend fun getPages(chapter: MangaChapter): List<MangaPage> {
+        // Karena chapUrl Mikodrive nggak kita hapus, dia bakal masuk ke kondisi startsWith("http") ini
         val fullUrl = if (chapter.url.startsWith("http")) {
             chapter.url 
         } else {
-            // Kita coba akses ke mikoroku dulu, karena biasanya JS redirect ada di sana
             "https://$domain${chapter.url}" 
         }
 
         var doc = webClient.httpGet(fullUrl).parseHtml()
 
-        // Tangani kalau ada JS Redirect ke Mikodrive
+        // Jaga-jaga kalau ada JS Redirect
         val scripts = doc.select("script")
         for (script in scripts) {
             val data = script.data()
@@ -93,7 +87,7 @@ internal class Mikoroku(context: MangaLoaderContext) :
             }
         }
 
-        // Selector gabungan: Penemuan kita (.max-w) + Penemuan Tachiyomi (div.separator)
+        // Ambil gambar
         val images = doc.select("div.separator img, div.max-w img, div#readerarea img, div.post-body img")
         
         if (images.isEmpty()) {
