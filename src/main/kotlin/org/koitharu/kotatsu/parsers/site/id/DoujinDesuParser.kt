@@ -22,28 +22,21 @@ internal class DoujinDesuParser(context: MangaLoaderContext) :
 		keys.add(userAgentKey)
 	}
 
-	// 🔥 FIX: Mengembalikan semua opsi urutan (Sort) yang dihilangkan
+	// Fitur Urutan / Sorting dikembalikan
 	override val availableSortOrders: Set<SortOrder>
 		get() = EnumSet.of(SortOrder.UPDATED, SortOrder.NEWEST, SortOrder.ALPHABETICAL, SortOrder.POPULARITY)
 
-	// 🔥 FIX: Mengembalikan fitur kolom pencarian (Search)
 	override val filterCapabilities: MangaListFilterCapabilities
 		get() = MangaListFilterCapabilities(
 			isSearchSupported = true,
 			isAuthorSearchSupported = true,
+			isMultipleTagsSupported = false // Webnya udah gak dukung multi-tag!
 		)
 
 	override suspend fun getFilterOptions() = MangaListFilterOptions(
 		availableTags = fetchAvailableTags(),
-		availableStates = EnumSet.of(
-			MangaState.ONGOING,
-			MangaState.FINISHED,
-		),
-		availableContentTypes = EnumSet.of(
-			ContentType.MANGA,
-			ContentType.MANHWA,
-			ContentType.DOUJINSHI,
-		),
+		availableStates = EnumSet.of(MangaState.ONGOING, MangaState.FINISHED),
+		availableContentTypes = EnumSet.of(ContentType.MANGA, ContentType.MANHWA, ContentType.DOUJINSHI),
 	)
 
 	override fun getRequestHeaders(): Headers = Headers.Builder()
@@ -53,15 +46,18 @@ internal class DoujinDesuParser(context: MangaLoaderContext) :
 
 	override suspend fun getListPage(page: Int, order: SortOrder, filter: MangaListFilter): List<Manga> {
 		val url = urlBuilder().apply {
-			// 1. Setup Base Path (Genre / Author / Normal Manga List)
-			if (filter.tags.isNotEmpty()) {
+			val isGenrePath = filter.tags.isNotEmpty()
+			val isAuthorPath = !filter.author.isNullOrEmpty() && !isGenrePath
+
+			// 1. Setup Base Path
+			if (isGenrePath) {
 				addPathSegment("genre")
-				filter.tags.oneOrThrowIfMany()?.key?.let {
-					addPathSegment(it.lowercase().splitByWhitespace().joinToString("-"))
-				}
-			} else if (!filter.author.isNullOrEmpty()) {
+				// Ambil tag pertama aja biar webnya gak 404 kalau user milih banyak tag
+				val tag = filter.tags.first().key.lowercase().splitByWhitespace().joinToString("-")
+				addPathSegment(tag)
+			} else if (isAuthorPath) {
 				addPathSegment("author")
-				addPathSegment(filter.author.lowercase().splitByWhitespace().joinToString("-"))
+				addPathSegment(filter.author!!.lowercase().splitByWhitespace().joinToString("-"))
 			} else {
 				addPathSegment("manga")
 			}
@@ -72,52 +68,50 @@ internal class DoujinDesuParser(context: MangaLoaderContext) :
 				addPathSegment(page.toString())
 			}
 
-			// 🔥 3. FIX: Kembalikan query pencarian judul yang dihapus
-			if (!filter.query.isNullOrBlank()) {
-				addQueryParameter("title", filter.query)
-			}
-
-			// 🔥 4. FIX: Kembalikan parameter urutan (Sorting)
-			addQueryParameter(
-				"order",
-				when (order) {
-					SortOrder.UPDATED -> "update"
-					SortOrder.POPULARITY -> "popular"
-					SortOrder.ALPHABETICAL -> "title"
-					SortOrder.NEWEST -> "latest"
-					else -> "update"
+			// 🔥 3. PENCEGAHAN 404: Jangan masukin order/title/status ke halaman Genre/Author!
+			if (!isGenrePath && !isAuthorPath) {
+				if (!filter.query.isNullOrBlank()) {
+					addQueryParameter("title", filter.query)
 				}
-			)
 
-			// 5. Setup Status
-			filter.states.oneOrThrowIfMany()?.let {
 				addQueryParameter(
-					"status",
-					when (it) {
-						MangaState.ONGOING -> "Publishing"
-						MangaState.FINISHED -> "Finished"
-						else -> ""
-					},
-				)
-			}
-
-			// 6. Setup Tipe (Manga/Manhwa/Doujinshi)
-			filter.types.oneOrThrowIfMany()?.let {
-				addQueryParameter(
-					"type",
-					when (it) {
-						ContentType.MANGA -> "Manga"
-						ContentType.MANHWA -> "Manhwa"
-						ContentType.DOUJINSHI -> "Doujinshi"
-						else -> ""
+					"order",
+					when (order) {
+						SortOrder.UPDATED -> "update"
+						SortOrder.POPULARITY -> "popular"
+						SortOrder.ALPHABETICAL -> "title"
+						SortOrder.NEWEST -> "latest"
+						else -> "update"
 					}
 				)
+
+				filter.states.firstOrNull()?.let {
+					addQueryParameter(
+						"status",
+						when (it) {
+							MangaState.ONGOING -> "Publishing"
+							MangaState.FINISHED -> "Finished"
+							else -> ""
+						},
+					)
+				}
+
+				filter.types.firstOrNull()?.let {
+					addQueryParameter(
+						"type",
+						when (it) {
+							ContentType.MANGA -> "Manga"
+							ContentType.MANHWA -> "Manhwa"
+							ContentType.DOUJINSHI -> "Doujinshi"
+							else -> ""
+						}
+					)
+				}
 			}
 		}.build()
 
 		val response = webClient.httpGet(url).parseHtml()
 		
-		// Selector yang disempurnakan biar nggak rawan Crash
 		return response.select("#archives .entry, section#archives .entry")
 			.mapNotNull {
 				val href = it.selectFirst(".metadata > a")?.attr("href") ?: return@mapNotNull null
