@@ -30,15 +30,15 @@ internal class Mikoroku(context: MangaLoaderContext) :
         val fullUrl = if (cleanUrl.startsWith("http")) cleanUrl else "https://$domain$cleanUrl"
         val desktopDoc = webClient.httpGet(fullUrl).parseHtml()
 
-        // 1. Ambil URL Label asli dari HTML yang lu temuin tadi
+        // 1. Ambil URL Label asli dari HTML
         val tagElement = desktopDoc.selectFirst("a[href*=/search/label/], a[rel=tag]")
             ?: throw ParseException("Gagal menemukan link label Mikodrive", fullUrl)
 
-        // 2. Ekstrak Label Persis (contoh: Er0t1c41%20Wizard%20...)
+        // 2. Ekstrak Label Persis
         val rawLabelUrl = tagElement.attr("href")
         val exactLabel = rawLabelUrl.substringAfter("/search/label/").substringBefore("?").substringBefore("&")
 
-        // 3. Tembak API JSON langsung ke MIKODRIVE (BUKAN Mikoroku!)
+        // 3. Tembak API JSON langsung ke MIKODRIVE
         val apiUrl = "https://www.mikodrive.my.id/feeds/posts/default/-/$exactLabel?alt=json&max-results=999"
         val jsonResponse = webClient.httpGet(apiUrl).body?.string()
             ?: throw ParseException("Gagal narik API Mikodrive", apiUrl)
@@ -47,7 +47,6 @@ internal class Mikoroku(context: MangaLoaderContext) :
         val feed = json.optJSONObject("feed")
         val entries = feed?.optJSONArray("entry")
 
-        // Kalau beneran kosong, lemparkan error jelas biar gampang di-trace
         if (entries == null || entries.length() == 0) {
             throw ParseException("API Mikodrive beneran kosong untuk label $exactLabel", apiUrl)
         }
@@ -72,7 +71,6 @@ internal class Mikoroku(context: MangaLoaderContext) :
                 }
             }
 
-            // Bersihkan URL dari domain biar Kotatsu nyimpennya sebagai relative path
             chapterUrl = chapterUrl.substringBefore("?m=1")
                 .removePrefix("https://www.mikodrive.my.id")
                 .removePrefix("http://www.mikodrive.my.id")
@@ -83,6 +81,9 @@ internal class Mikoroku(context: MangaLoaderContext) :
                     title = title,
                     number = -1f,
                     volume = 0,
+                    scanlator = "",     // <-- FIXED: Parameter yang ketinggalan
+                    uploadDate = 0L,    // <-- FIXED: Parameter yang ketinggalan
+                    branch = "",        // <-- FIXED: Parameter yang ketinggalan
                     url = chapterUrl,
                     source = source
                 )
