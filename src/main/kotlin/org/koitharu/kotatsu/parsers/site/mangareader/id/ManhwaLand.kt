@@ -22,7 +22,7 @@ internal class ManhwaLand(context: MangaLoaderContext) :
 		
 	override val datePattern = "MMM d, yyyy"
 
-	// 🔥 FIX 1: Paksa semua link gambar yang jadul (http://) jadi aman (https://)
+	// 🔥 FIX 1: Paksa semua link gambar jadi HTTPS
 	override suspend fun getPages(chapter: MangaChapter): List<MangaPage> {
 		val pages = super.getPages(chapter)
 		return pages.map { page ->
@@ -30,18 +30,21 @@ internal class ManhwaLand(context: MangaLoaderContext) :
 		}
 	}
 
-	// 🔥 FIX 2: SUNTIK PAKSA KTP (Referer) langsung ke urat nadi CDN!
-	// Ini bakal ngebypass pemblokiran keamanan Kotatsu dan satpam CDN.
+	// 🔥 FIX 2: Interceptor "Preman" - Nyuntik Referer & UA ke semua request ManhwaLand
 	override fun intercept(chain: Interceptor.Chain): Response {
-		var request = chain.request()
+		val request = chain.request()
+		val host = request.url.host
 		
-		if (request.url.host.contains("manhwaland")) {
-			request = request.newBuilder()
-				.header("Referer", "https://$domain/")
-				.header("Origin", "https://$domain")
-				.header("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
-				.header("User-Agent", config[userAgentKey])
+		// Cek kalau request lari ke domain manhwaland (baby atau email)
+		if (host.contains("manhwaland")) {
+			val newRequest = request.newBuilder()
+				.removeHeader("Referer") // Hapus referer lama biar gak bentrok
+				.addHeader("Referer", "https://www.manhwaland.baby/")
+				// Pakai User-Agent Chrome PC biar gak dicurigai bot mobile
+				.removeHeader("User-Agent")
+				.addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 				.build()
+			return chain.proceed(newRequest)
 		}
 		
 		return chain.proceed(request)
