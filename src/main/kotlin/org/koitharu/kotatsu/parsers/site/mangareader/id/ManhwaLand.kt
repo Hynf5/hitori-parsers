@@ -4,7 +4,9 @@ import okhttp3.Headers
 import org.koitharu.kotatsu.parsers.MangaLoaderContext
 import org.koitharu.kotatsu.parsers.MangaSourceParser
 import org.koitharu.kotatsu.parsers.model.ContentType
+import org.koitharu.kotatsu.parsers.model.MangaChapter
 import org.koitharu.kotatsu.parsers.model.MangaListFilterCapabilities
+import org.koitharu.kotatsu.parsers.model.MangaPage
 import org.koitharu.kotatsu.parsers.model.MangaParserSource
 import org.koitharu.kotatsu.parsers.site.mangareader.MangaReaderParser
 
@@ -19,9 +21,21 @@ internal class ManhwaLand(context: MangaLoaderContext) :
 		
 	override val datePattern = "MMM d, yyyy"
 
-	// 🔥 FIX 403 FORBIDDEN: Pasang KTP palsu (Referer) biar CDN gambar ngasih izin masuk!
+	// 🔥 FIX 1: Perkuat Headers! Tambahin Origin & Accept biar 100% mirip Browser Asli
 	override fun getRequestHeaders(): Headers = Headers.Builder()
 		.add("Referer", "https://$domain/")
+		.add("Origin", "https://$domain")
+		.add("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
 		.add("User-Agent", config[userAgentKey])
 		.build()
-}
+
+	// 🔥 FIX 2: Cegat URL gambarnya dan PAKSA ganti dari http:// jadi https://
+	override suspend fun getPages(chapter: MangaChapter): List<MangaPage> {
+		val pages = super.getPages(chapter)
+		return pages.map { page ->
+			// Ubah link paksa ke jalur aman biar nggak kena blokir 403
+			page.copy(url = page.url.replace("http://", "https://"))
+		}
+	}
+    }
+    
