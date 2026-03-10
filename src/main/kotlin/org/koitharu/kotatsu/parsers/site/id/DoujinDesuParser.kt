@@ -10,7 +10,7 @@ import org.koitharu.kotatsu.parsers.util.*
 import java.text.SimpleDateFormat
 import java.util.*
 
-@MangaSourceParser("DOUJINDESU", "DoujinDesu.tv", "id")
+@MangaSourceParser("DOUJINDESU", "DoujinDesu.tv", "id", ContentType.HENTAI)
 internal class DoujinDesuParser(context: MangaLoaderContext) :
 	PagedMangaParser(context, MangaParserSource.DOUJINDESU, pageSize = 18) {
 
@@ -23,24 +23,18 @@ internal class DoujinDesuParser(context: MangaLoaderContext) :
 	}
 
 	override val availableSortOrders: Set<SortOrder>
-		get() = EnumSet.of(SortOrder.UPDATED, SortOrder.NEWEST, SortOrder.ALPHABETICAL, SortOrder.POPULARITY)
+		get() = EnumSet.of(SortOrder.UPDATED, SortOrder.NEWEST, SortOrder.POPULARITY, SortOrder.ALPHABETICAL)
 
 	override val filterCapabilities: MangaListFilterCapabilities
 		get() = MangaListFilterCapabilities(
-			isMultipleTagsSupported = true,
 			isSearchSupported = true,
-			isSearchWithFiltersSupported = true,
-            isAuthorSearchSupported = true,
+			isAuthorSearchSupported = true,
 		)
 
 	override suspend fun getFilterOptions() = MangaListFilterOptions(
 		availableTags = fetchAvailableTags(),
 		availableStates = EnumSet.of(MangaState.ONGOING, MangaState.FINISHED),
-		availableContentTypes = EnumSet.of(
-			ContentType.MANGA,
-			ContentType.MANHWA,
-			ContentType.DOUJINSHI,
-		),
+		availableContentTypes = EnumSet.noneOf(ContentType::class.java),
 	)
 
 	override fun getRequestHeaders(): Headers = Headers.Builder()
@@ -50,87 +44,120 @@ internal class DoujinDesuParser(context: MangaLoaderContext) :
 
 	override suspend fun getListPage(page: Int, order: SortOrder, filter: MangaListFilter): List<Manga> {
 		val url = urlBuilder().apply {
-            when {
-                page > 1 -> addPathSegments("manga/page/$page/")
-                else -> addPathSegment("manga/")
-            }
+			val isSearch = !filter.query.isNullOrBlank()
+			val isGenre = filter.tags.isNotEmpty()
+			val isAuthor = !filter.author.isNullOrBlank()
 
-            addQueryParameter(
-				"title",
-				filter.query?.let {
-					filter.query
-				},
-			)
+			if (isSearch) {
+				if (page > 1) {
+					addPathSegment("page")
+					addPathSegment(page.toString())
+					addPathSegment("") 
+				}
+				addQueryParameter("s", filter.query)
+				
+				// Cuma masukin tipe kalau BUKAN Abjad
+				if (order != SortOrder.ALPHABETICAL) {
+					addQueryParameter(
+						"type",
+						when (order) {
+							SortOrder.UPDATED -> "Manga"
+							SortOrder.NEWEST -> "Doujinshi"
+							SortOrder.POPULARITY -> "Manhwa"
+							else -> "Manga"
+						}
+					)
+				}
+			} else if (isGenre) {
+				val tagSlug = filter.tags.first().key
+				addPathSegment("genre")
+				addPathSegment(tagSlug)
+				addPathSegment("")
+				if (page > 1) {
+					addPathSegment("page")
+					addPathSegment(page.toString())
+					addPathSegment("")
+				}
+			} else if (isAuthor) {
+				val authorSlug = filter.author!!.lowercase().trim().replace(Regex("\\s+"), "-")
+				addPathSegment("author")
+				addPathSegment(authorSlug)
+				addPathSegment("")
+				if (page > 1) {
+					addPathSegment("page")
+					addPathSegment(page.toString())
+					addPathSegment("")
+				}
+			} else {
+				addPathSegment("manga")
+				addPathSegment("")
+				if (page > 1) {
+					addPathSegment("page")
+					addPathSegment(page.toString())
+					addPathSegment("")
+				}
 
-            addQueryParameter(
-                name = "author",
-                value = filter.author?.let { it
-                    space2plus(it).lowercase()
-                }
-            )
+				if (order != SortOrder.ALPHABETICAL) {
+					addQueryParameter(
+						"type",
+						when (order) {
+							SortOrder.UPDATED -> "Manga"
+							SortOrder.NEWEST -> "Doujinshi"
+							SortOrder.POPULARITY -> "Manhwa"
+							else -> "Manga"
+						}
+					)
+					addQueryParameter("order", "update")
+				}
 
-			addQueryParameter(
-				"order",
-				when (order) {
-					SortOrder.UPDATED -> "update"
-					SortOrder.POPULARITY -> "popular"
-					SortOrder.ALPHABETICAL -> "title"
-					SortOrder.NEWEST -> "latest"
-					else -> "latest"
-				},
-			)
-
-			filter.tags.forEach {
-				addEncodedQueryParameter("genre[]".urlEncoded(), it.key.urlEncoded())
-			}
-
-			filter.states.oneOrThrowIfMany()?.let {
-				addEncodedQueryParameter(
-					"statusx",
-					when (it) {
-						MangaState.ONGOING -> "Publishing"
-						MangaState.FINISHED -> "Finished"
-						else -> ""
-					},
-				)
-			}
-
-			filter.types.oneOrThrowIfMany()?.let {
-				addQueryParameter(
-					"typex",
-					when (it) {
-						ContentType.MANGA -> "Manga"
-						ContentType.MANHWA -> "Manhwa"
-						ContentType.DOUJINSHI -> "Doujinshi"
-						else -> ""
-					},
-				)
+				if (filter.states.isNotEmpty()) {
+					filter.states.firstOrNull()?.let {
+						addQueryParameter(
+							"status",
+							when (it) {
+								MangaState.ONGOING -> "Publishing"
+								MangaState.FINISHED -> "Finished"
+								else -> ""
+							},
+						)
+					}
+				}
 			}
 		}.build()
 
-		return webClient.httpGet(url).parseHtml()
-			.requireElementById("archives")
-			.selectFirstOrThrow("div.entries")
-			.select(".entry")
-			.mapNotNull {
-				val href = it.selectFirst(".metadata > a")?.attr("href") ?: return@mapNotNull null
-				Manga(
-					id = generateUid(href),
-					title = it.selectFirst(".metadata > a")?.attr("title").orEmpty(),
-					altTitles = emptySet(),
-					url = href,
-					publicUrl = href.toAbsoluteUrl(domain),
-					rating = RATING_UNKNOWN,
-					contentRating = ContentRating.ADULT,
-					coverUrl = it.selectFirst(".thumbnail > img")?.src(),
-					tags = emptySet(),
-					state = null,
-					authors = emptySet(),
-					largeCoverUrl = null,
-					description = null,
-					source = source,
-				)
-			}
+		val response = webClient.httpGet(url).parseHtml()
+		
+		val elements = response.select("#archives .entry, section#archives .entry, .entries .entry, .postbody .entry, .bsx, .animepost")
+
+		return elements.mapNotNull {
+			val aTag = it.selectFirst(".metadata > a") ?: it.selectFirst("a") ?: return@mapNotNull null
+			val href = aTag.attr("href")
+			
+			val title = it.selectFirst(".metadata > a")?.attr("title") 
+				?: it.selectFirst(".title, .tt")?.text() 
+				?: aTag.attr("title") 
+				?: "Unknown"
+				
+			val coverUrl = it.selectFirst(".thumbnail > img")?.attr("src") 
+				?: it.selectFirst("img")?.attr("src")
+
+			Manga(
+				id = generateUid(href),
+				title = title.trim(),
+				altTitles = emptySet(),
+				url = href,
+				publicUrl = href.toAbsoluteUrl(domain),
+				rating = RATING_UNKNOWN,
+				contentRating = ContentRating.ADULT,
+				coverUrl = coverUrl,
+				tags = emptySet(),
+				state = null,
+				authors = emptySet(),
+				largeCoverUrl = null,
+				description = null,
+				source = source,
+			)
+		}
 	}
 
 	override suspend fun getDetails(manga: Manga): Manga {
@@ -143,6 +170,7 @@ internal class DoujinDesuParser(context: MangaLoaderContext) :
 			else -> null
 		}
 		val author = metadataEl?.selectFirst("tr:contains(Author)")?.selectLast("td")?.text()
+		
 		return manga.copy(
 			authors = setOfNotNull(author),
 			description = docs.selectFirst(".wrapper > .metadata > .pb-2")?.selectFirst("p")?.html(),
@@ -150,8 +178,8 @@ internal class DoujinDesuParser(context: MangaLoaderContext) :
 			rating = metadataEl?.selectFirst(".rating-prc")?.ownText()?.toFloatOrNull()?.div(10f) ?: RATING_UNKNOWN,
 			tags = docs.select(".tags > a").mapToSet {
 				MangaTag(
-					key = it.attr("title"),
-					title = it.text(),
+					key = it.attr("href").trimEnd('/').substringAfterLast('/'),
+					title = it.text().trim(),
 					source = source,
 				)
 			},
@@ -179,6 +207,7 @@ internal class DoujinDesuParser(context: MangaLoaderContext) :
 		val id = webClient.httpGet(chapter.url.toAbsoluteUrl(domain)).parseHtml()
 			.requireElementById("reader")
 			.attr("data-id")
+		
 		return webClient.httpPost("/themes/ajax/ch.php".toAbsoluteUrl(domain), "id=$id").parseHtml()
 			.select("img")
 			.map {
@@ -198,13 +227,14 @@ internal class DoujinDesuParser(context: MangaLoaderContext) :
 			.selectFirstOrThrow(".entries")
 			.select(".entry > a")
 			.mapToSet {
+				val href = it.attr("href")
+				val slug = href.trimEnd('/').substringAfterLast('/')
 				MangaTag(
-					key = it.attr("title"),
-					title = it.attr("title"),
+					key = slug,
+					title = it.text().trim(),
 					source = source,
 				)
 			}
 	}
-
-    private fun space2plus(input: String): String = input.replace(' ', '+')
-}
+    }
+    
