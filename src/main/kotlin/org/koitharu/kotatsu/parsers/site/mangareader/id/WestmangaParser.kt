@@ -20,9 +20,11 @@ import javax.crypto.spec.SecretKeySpec
 internal class WestmangaParser(context: MangaLoaderContext) :
 	PagedMangaParser(context, MangaParserSource.WESTMANGA, pageSize = 20) {
 
-	override val configKeyDomain = ConfigKey.Domain("westmanga.me")
+	override val configKeyDomain = ConfigKey.Domain("westmanga.tv")
 
-	private val apiDomain = "data.westmanga.me"
+	private val apiDomain: String
+		get() = "data.$domain"
+		
 	private val accessKey = "WM_WEB_FRONT_END"
 	private val secretKey = "xxxoidj"
 
@@ -253,4 +255,5 @@ internal class WestmangaParser(context: MangaLoaderContext) :
 			.add("x-wm-request-signature", signature)
 			.build()
 	}
-}
+    }
+    
