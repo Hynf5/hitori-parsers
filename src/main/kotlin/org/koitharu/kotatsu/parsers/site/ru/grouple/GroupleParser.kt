@@ -142,6 +142,43 @@ internal abstract class GroupleParser(
         val hashRegex = Regex("window.user_hash\\s*=\\s*\'([^\']+)\'")
         val userHash = doc.select("script").firstNotNullOfOrNull { it.html().findGroupValue(hashRegex) }
         val hasNsfwAlert = root.select(".alert-warning").any { it.ownText().contains(NSFW_ALERT) }
+        val tagLinks = root.select(
+            "div.subject-meta a.element-link, " +
+                ".subject-meta a.element-link, " +
+                ".elem_genre a, " +
+                ".subject-tags a, " +
+                ".cr-tags a.cr-tags__item, " +
+                "a.element-link[href*='/genre/'], " +
+                "a[href*='/list/genre/'], " +
+                "a[href*='/genre/'], " +
+                "a[href*='/list/tag/'], " +
+                "a[href*='/tag/']",
+        ) + doc.select(".cr-tags a.cr-tags__item")
+        val tags = tagLinks.mapNotNullTo(manga.tags.toMutableSet()) { a ->
+            val title = a.textOrNull()
+                ?.replace("#", "")
+                ?.trim()
+                ?.toTitleCase()
+                ?.takeIf { it.isNotEmpty() }
+                ?: return@mapNotNullTo null
+            val href = a.attrOrNull("href")
+            val key = when {
+                href.isNullOrEmpty() -> title.lowercase().replace(Regex("[^\\p{L}\\p{N}]+"), "-").trim('-')
+                "/list/genre/" in href -> href.substringAfter("/list/genre/").substringBefore('/').substringBefore('?')
+                "/list/tag/" in href -> href.substringAfter("/list/tag/").substringBefore('/').substringBefore('?')
+                "/genre/" in href -> href.substringAfter("/genre/").substringBefore('/').substringBefore('?')
+                "/tag/" in href -> href.substringAfter("/tag/").substringBefore('/').substringBefore('?')
+                else -> href.removeSuffix('/').substringAfterLast('/').substringBefore('?')
+            }.ifEmpty {
+                title.lowercase().replace(Regex("[^\\p{L}\\p{N}]+"), "-").trim('-')
+            }
+            if (key.isEmpty()) return@mapNotNullTo null
+            MangaTag(
+                title = title,
+                key = key,
+                source = source,
+            )
+        }
         return manga.copy(
             source = newSource,
             title = doc.metaValue("name") ?: manga.title,
@@ -153,14 +190,7 @@ internal abstract class GroupleParser(
             largeCoverUrl = coverImg?.attrAsAbsoluteUrlOrNull("data-full"),
             coverUrl = manga.coverUrl
                 ?: coverImg?.attrAsAbsoluteUrlOrNull("data-thumb")?.replace("_p.", "."),
-            tags = root.selectFirstOrThrow("div.subject-meta")
-                .getElementsByAttributeValueContaining("href", "/list/genre/").mapTo(manga.tags.toMutableSet()) { a ->
-                    MangaTag(
-                        title = a.text().toTitleCase(),
-                        key = a.attr("href").removeSuffix('/').substringAfterLast('/'),
-                        source = source,
-                    )
-                },
+            tags = tags,
             state = if (isRestricted) {
                 MangaState.RESTRICTED
             } else {
@@ -171,51 +201,122 @@ internal abstract class GroupleParser(
                 .mapNotNullToSet { it.textOrNull() } + manga.authors,
             contentRating = (if (hasNsfwAlert) ContentRating.SUGGESTIVE else ContentRating.SAFE)
                 .coerceAtLeast(manga.contentRating ?: ContentRating.SAFE),
-            chapters = chaptersList?.select("a.chapter-link")
-                ?.flatMapChapters(reversed = true) { a ->
-                    val tr = a.selectFirstParent("tr") ?: return@flatMapChapters emptyList()
-                    val href = a.attrAsRelativeUrl("href")
-                    val number = tr.attr("data-num").toFloatOrNull()?.div(10f) ?: 0f
-                    val volume = tr.attr("data-vol").toIntOrNull() ?: 0
-                    if (translations.isNullOrEmpty() || a.attr("data-translations").isEmpty()) {
-                        var translators = ""
-                        val translatorElement = a.attr("title")
-                        if (translatorElement.isNotBlank()) {
-                            translators = translatorElement.replace("(Переводчик),", "&").removeSuffix(" (Переводчик)")
-                        }
-                        listOf(
-                            MangaChapter(
-                                id = generateUid(href),
-                                title = a.text().removePrefix(manga.title).trim().nullIfEmpty(),
-                                number = number,
-                                volume = volume,
-                                url = href.withQueryParam("d", userHash),
-                                uploadDate = dateFormat.parseSafe(tr.selectFirst("td.date")?.text()),
-                                scanlator = translators,
-                                source = newSource,
-                                branch = null,
-                            ),
-                        )
-                    } else {
-                        val translationData = JSONArray(a.attr("data-translations"))
-                        translationData.mapJSON { jo ->
-                            val personId = jo.getLong("personId")
-                            val link = href.withQueryParam("tran", personId.toString())
-                            MangaChapter(
-                                id = generateUid(link),
-                                title = a.text().removePrefix(manga.title).trim(),
-                                number = number,
-                                volume = volume,
-                                url = link.withQueryParam("d", userHash),
-                                uploadDate = dateFormat.parseSafe(jo.getStringOrNull("dateCreated")),
-                                scanlator = null,
-                                source = newSource,
-                                branch = translations[personId],
-                            )
-                        }
+            chapters = (
+                chaptersList?.select("tr.item-row")?.takeIf { it.isNotEmpty() }
+                    ?: chaptersList?.select("a.chapter-link")
+            )?.flatMapChapters(reversed = true) { rowOrLink ->
+                val (tr, a) = if (rowOrLink.tagName() == "tr") {
+                    val trNode = rowOrLink
+                    val aNode = trNode.selectFirst("a.chapter-link") ?: return@flatMapChapters emptyList()
+                    trNode to aNode
+                } else {
+                    val aNode = rowOrLink
+                    val trNode = aNode.selectFirstParent("tr") ?: return@flatMapChapters emptyList()
+                    trNode to aNode
+                }
+
+                val href = a.attrAsRelativeUrl("href")
+                val number = parseChapterNumber(href, tr, a)
+                val volume = parseChapterVolume(href, tr)
+                val chapterTitle = a.ownText().ifBlank { a.text() }.removePrefix(manga.title).trim().nullIfEmpty()
+                val uploadDate = parseChapterUploadDate(tr, dateFormat)
+
+                if (translations.isNullOrEmpty() || a.attr("data-translations").isEmpty()) {
+                    var translators = ""
+                    val translatorElement = a.attr("title")
+                    if (translatorElement.isNotBlank()) {
+                        translators = translatorElement.replace("(Переводчик),", "&").removeSuffix(" (Переводчик)")
                     }
-                }.orEmpty(),
+                    listOf(
+                        MangaChapter(
+                            id = generateUid(href),
+                            title = chapterTitle,
+                            number = number,
+                            volume = volume,
+                            url = href.withQueryParam("d", userHash),
+                            uploadDate = uploadDate,
+                            scanlator = translators,
+                            source = newSource,
+                            branch = null,
+                        ),
+                    )
+                } else {
+                    val translationData = runCatching { JSONArray(a.attr("data-translations")) }.getOrNull()
+                        ?: return@flatMapChapters emptyList()
+                    translationData.mapJSON { jo ->
+                        val personId = jo.getLong("personId")
+                        val link = href.withQueryParam("tran", personId.toString())
+                        MangaChapter(
+                            id = generateUid(link),
+                            title = chapterTitle,
+                            number = number,
+                            volume = volume,
+                            url = link.withQueryParam("d", userHash),
+                            uploadDate = parseChapterAnyDate(jo.getStringOrNull("dateCreated"), dateFormat),
+                            scanlator = null,
+                            source = newSource,
+                            branch = translations[personId],
+                        )
+                    }
+                }
+            }.orEmpty(),
         )
+    }
+
+    private fun parseChapterNumber(href: String, tr: Element, a: Element): Float {
+        HREF_CHAPTER_NUMBER_REGEX.find(href)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.replace(',', '.')
+            ?.toFloatOrNull()
+            ?.let { return it }
+
+        val titleText = a.ownText().ifBlank { a.text() }.replace("новое", "", ignoreCase = true).trim()
+        TITLE_CHAPTER_NUMBER_REGEX.find(titleText)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.replace(',', '.')
+            ?.toFloatOrNull()
+            ?.let { return it }
+
+        val raw = tr.attr("data-num")
+        raw.replace(',', '.').toFloatOrNull()?.let { value ->
+            return if (raw.contains('.') || raw.contains(',')) {
+                value
+            } else {
+                value / 10f
+            }
+        }
+        return 0f
+    }
+
+    private fun parseChapterVolume(href: String, tr: Element): Int {
+        tr.attr("data-vol").toIntOrNull()?.let { return it }
+        return HREF_VOLUME_REGEX.find(href)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
+    }
+
+    private fun parseChapterUploadDate(tr: Element, shortDateFormat: SimpleDateFormat): Long {
+        val dateTd = tr.selectFirst("td.date") ?: return 0L
+        val dateText = dateTd.attrOrNull("data-date") ?: dateTd.textOrNull()
+        parseChapterAnyDate(dateText, shortDateFormat).takeIf { it != 0L }?.let { return it }
+        return parseChapterAnyDate(dateTd.attrOrNull("data-date-raw"), shortDateFormat)
+    }
+
+    private fun parseChapterAnyDate(dateText: String?, shortDateFormat: SimpleDateFormat): Long {
+        if (dateText.isNullOrBlank()) {
+            return 0L
+        }
+        shortDateFormat.parseSafe(dateText).takeIf { it != 0L }?.let { return it }
+        SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).parseSafe(dateText).takeIf { it != 0L }?.let {
+            return it
+        }
+        SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).parseSafe(dateText).takeIf { it != 0L }?.let {
+            return it
+        }
+        SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).parseSafe(dateText).takeIf { it != 0L }?.let {
+            return it
+        }
+        return SimpleDateFormat("yyyy-MM-dd", Locale.US).parseSafe(dateText)
     }
 
     override suspend fun getPages(chapter: MangaChapter): List<MangaPage> {
@@ -327,9 +428,16 @@ internal abstract class GroupleParser(
 
     override suspend fun getRelatedManga(seed: Manga): List<Manga> {
         val doc = webClient.httpGet(seed.url.toAbsoluteUrl(domain)).parseHtml()
-        val root = doc.body().requireElementById("mangaBox").select("h4").first { it.ownText() == RELATED_TITLE }
-            .nextElementSibling() ?: doc.parseFailed("Cannot find root")
-        return root.select("div.tile").mapNotNull(::parseManga)
+        val body = doc.body()
+        val root = body.getElementById("mangaBox")
+        val relatedHeader = root?.select("h4")?.firstOrNull {
+            it.ownText().contains(RELATED_TITLE, ignoreCase = true)
+        }
+        val relatedContainer = relatedHeader?.nextElementSibling()
+            ?: root?.selectFirst("div.tiles.row:has(.tile), .related-titles, .recommendations")
+            ?: body.selectFirst("div.tiles.row:has(.tile)")
+            ?: return emptyList()
+        return relatedContainer.select("div.tile").mapNotNull(::parseManga)
     }
 
     protected open fun getSource(url: HttpUrl): MangaSource = when (url.host) {
@@ -582,4 +690,10 @@ internal abstract class GroupleParser(
     }
 
     private fun hasAuthCookie() = context.cookieJar.getCookies(domain).any { it.name == "gwt" }
+
+    private companion object {
+        private val HREF_VOLUME_REGEX = Regex("""/vol(\d+)/""", RegexOption.IGNORE_CASE)
+        private val HREF_CHAPTER_NUMBER_REGEX = Regex("""/vol\d+/([0-9]+(?:[.,]\d+)?)""", RegexOption.IGNORE_CASE)
+        private val TITLE_CHAPTER_NUMBER_REGEX = Regex("""([0-9]+(?:[.,]\d+)?)\s*$""")
+    }
 }

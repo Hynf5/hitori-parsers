@@ -1,5 +1,6 @@
 package org.koitharu.kotatsu.parsers.site.mangareader.pt
 
+import org.koitharu.kotatsu.parsers.Broken
 import org.koitharu.kotatsu.parsers.MangaLoaderContext
 import org.koitharu.kotatsu.parsers.MangaSourceParser
 import org.koitharu.kotatsu.parsers.model.MangaListFilterCapabilities
@@ -8,6 +9,7 @@ import org.koitharu.kotatsu.parsers.site.mangareader.MangaReaderParser
 import org.koitharu.kotatsu.parsers.model.*
 import org.koitharu.kotatsu.parsers.util.*
 
+@Broken
 @MangaSourceParser("SSSSCANLATOR", "YomuComics", "pt")
 internal class SssScanlator(context: MangaLoaderContext) :
 	MangaReaderParser(context, MangaParserSource.SSSSCANLATOR, "yomucomics.com", pageSize = 20, searchPageSize = 10) {
