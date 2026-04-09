@@ -147,8 +147,8 @@ internal class Klz9(context: MangaLoaderContext) :
 
 		return chaptersArray.mapJSON { chapterObj ->
 			val chapterId = chapterObj.getLong("id")
-			val chapterNumber = chapterObj.optDouble("chapter", 0.0).toFloat()
-			val chapterTitle = chapterObj.optString("name", "").nullIfEmpty()
+			val chapterNumber = parseChapterNumber(chapterObj)
+			val chapterTitle = parseChapterTitle(chapterObj)
 			val uploadDate = parseChapterDate(chapterObj.optString("last_update", ""))
 
 			// Format chapter number to remove .0 if it's a whole number
@@ -175,7 +175,38 @@ internal class Klz9(context: MangaLoaderContext) :
 				scanlator = null,
 				branch = null,
 			)
-		}.reversed() // Reverse to get ascending order
+		}.sortedWith(
+			compareBy<MangaChapter> { it.number }
+				.thenBy { it.uploadDate }
+				.thenBy { it.id },
+		)
+	}
+
+	private fun parseChapterNumber(chapterObj: JSONObject): Float {
+		val directNumber = chapterObj.optDouble("chapter", Double.NaN)
+			.takeUnless { it.isNaN() }
+			?: chapterObj.optDouble("number", Double.NaN).takeUnless { it.isNaN() }
+		if (directNumber != null) return directNumber.toFloat()
+
+		val rawValue = sequenceOf(
+			chapterObj.optString("chapter", ""),
+			chapterObj.optString("number", ""),
+			chapterObj.optString("name", ""),
+			chapterObj.optString("title", ""),
+		).firstOrNull { it.isNotBlank() && !it.equals("null", ignoreCase = true) }.orEmpty()
+
+		return Regex("""(\d+(?:\.\d+)?)""").find(rawValue)?.groupValues?.getOrNull(1)?.toFloatOrNull() ?: 0f
+	}
+
+	private fun parseChapterTitle(chapterObj: JSONObject): String? {
+		return sequenceOf(
+			chapterObj.optString("name", ""),
+			chapterObj.optString("title", ""),
+			chapterObj.optString("chapter_name", ""),
+			chapterObj.optString("chapter_title", ""),
+		).mapNotNull { raw ->
+			raw.trim().takeUnless { it.isEmpty() || it.equals("null", ignoreCase = true) }
+		}.firstOrNull()
 	}
 
 	private fun parseChapterDate(dateString: String): Long {

@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:www.mangabats.com)",
+      "Bash(node test_comix_scraping.js:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

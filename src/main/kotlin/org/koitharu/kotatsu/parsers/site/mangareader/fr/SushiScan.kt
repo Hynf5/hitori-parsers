@@ -12,9 +12,8 @@ internal class SushiScan(context: MangaLoaderContext) :
 	MangaReaderParser(context, MangaParserSource.SUSHISCAN, "sushiscan.net", pageSize = 20, searchPageSize = 10) {
 	override val listUrl = "/catalogue"
 	override val datePattern = "MMM d, yyyy"
-
-	override fun onCreateConfig(keys: MutableCollection<ConfigKey<*>>) {
-		super.onCreateConfig(keys)
-		keys.add(ConfigKey.InterceptCloudflare(defaultValue = true))
-	}
+    override fun onCreateConfig(keys: MutableCollection<ConfigKey<*>>) {
+        super.onCreateConfig(keys)
+        keys.add(ConfigKey.InterceptCloudflare(defaultValue = true))
+    }
 }

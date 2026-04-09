@@ -3,12 +3,17 @@ package org.koitharu.kotatsu.parsers.site.madara.tr
 import org.koitharu.kotatsu.parsers.MangaLoaderContext
 import org.koitharu.kotatsu.parsers.MangaSourceParser
 import org.koitharu.kotatsu.parsers.model.MangaParserSource
-import org.koitharu.kotatsu.parsers.site.madara.MadaraParser
-import org.koitharu.kotatsu.parsers.Broken
+import org.koitharu.kotatsu.parsers.site.initmanga.InitMangaParser
 
-@Broken
 @MangaSourceParser("RAGNARSCANS", "Ragnarscans", "tr")
 internal class Ragnarscans(context: MangaLoaderContext) :
-    MadaraParser(context, MangaParserSource.RAGNARSCANS, "ragnarscans.com", pageSize = 10) {
-	  override val datePattern = "d MMMM yyyy"
-}
+	InitMangaParser(
+		context = context,
+		source = MangaParserSource.RAGNARSCANS,
+		domain = "ragnarscans.com",
+		pageSize = 20,
+		searchPageSize = 20,
+		mangaUrlDirectory = "manga",
+		popularUrlSlug = "en-cok-takip-edilenler",
+		isCloudflareProtected = true,
+	)

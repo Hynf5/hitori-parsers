@@ -2,15 +2,16 @@ package org.koitharu.kotatsu.parsers.site.mangareader.tr
 
 import org.koitharu.kotatsu.parsers.MangaLoaderContext
 import org.koitharu.kotatsu.parsers.MangaSourceParser
-import org.koitharu.kotatsu.parsers.model.MangaListFilterCapabilities
 import org.koitharu.kotatsu.parsers.model.MangaParserSource
-import org.koitharu.kotatsu.parsers.site.mangareader.MangaReaderParser
+import org.koitharu.kotatsu.parsers.site.initmanga.InitMangaParser
 
 @MangaSourceParser("MERLINSCANS", "MerlinScans", "tr")
 internal class MerlinScans(context: MangaLoaderContext) :
-	MangaReaderParser(context, MangaParserSource.MERLINSCANS, "merlinscans.com", pageSize = 20, searchPageSize = 10) {
-	override val filterCapabilities: MangaListFilterCapabilities
-		get() = super.filterCapabilities.copy(
-			isTagsExclusionSupported = false,
-		)
-}
+	InitMangaParser(
+		context = context,
+		source = MangaParserSource.MERLINSCANS,
+		domain = "merlintoon.com",
+		pageSize = 20,
+		searchPageSize = 20,
+		latestUrlSlug = "son-guncellenenler",
+	)

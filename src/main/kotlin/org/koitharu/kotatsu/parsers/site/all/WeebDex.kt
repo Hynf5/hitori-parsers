@@ -1,6 +1,7 @@
 package org.koitharu.kotatsu.parsers.site.all
 
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import org.json.JSONArray
 import org.json.JSONObject
 import org.koitharu.kotatsu.parsers.MangaLoaderContext
 import org.koitharu.kotatsu.parsers.MangaSourceParser
@@ -19,7 +20,8 @@ internal abstract class WeebDexParser(
 
     override val configKeyDomain = ConfigKey.Domain("weebdex.org")
     private val apiUrl = "https://api.weebdex.org/"
-    private val coverCdnUrl = "https://srv.notdelta.xyz/"
+    private val coverCdnUrl = "https://weebdex.org/"
+    private val dataCdnUrl = "https://s15.weebdex.net/data/"
 
     override val availableSortOrders: Set<SortOrder> = EnumSet.of(
         SortOrder.UPDATED,
@@ -227,8 +229,35 @@ internal abstract class WeebDexParser(
 
         // Get chapters for this language
         val mangaId = manga.url.substringAfterLast("/")
-        val chaptersJson = webClient.httpGet("${apiUrl}manga/$mangaId/chapters?lang=$lang&limit=500&order=desc").parseJson()
-        val chapters = parseChapterList(chaptersJson, mangaId)
+
+        val chaptersJsonData = JSONArray()
+
+        // handle the server-side paging of chapters
+        var currentPage = 1
+        var lastPageCount: Int
+        var totalCount: Int
+        do {
+            val chaptersPageJson =
+                webClient.httpGet("${apiUrl}manga/$mangaId/chapters?lang=$lang&limit=500&order=desc&page=$currentPage").parseJson()
+
+            totalCount = chaptersPageJson.getInt("total")
+
+            val chaptersPageJsonData = chaptersPageJson.getJSONArray("data")
+            lastPageCount = chaptersPageJsonData.length()
+            for (index in 0 until lastPageCount) {
+                chaptersJsonData.put(chaptersPageJsonData.get(index))
+            }
+
+            currentPage += 1
+
+            // Stop either:
+            // - when we collect the full reported number of chapters
+            // - or when we get an empty page.
+            //   This makes the loop terminate in case the total amount could not be retrieved
+            //    due to chapter list changing while we are retrieving it or due to bugs
+        } while (totalCount > chaptersJsonData.length() && lastPageCount > 0)
+
+        val chapters = parseChapterList(chaptersJsonData, mangaId)
 
         return manga.copy(
             description = description,
@@ -241,8 +270,7 @@ internal abstract class WeebDexParser(
         )
     }
 
-    private fun parseChapterList(json: JSONObject, mangaId: String): List<MangaChapter> {
-        val data = json.getJSONArray("data")
+    private fun parseChapterList(data: JSONArray, mangaId: String): List<MangaChapter> {
         val dateFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.ENGLISH).apply {
             timeZone = TimeZone.getTimeZone("UTC")
         }
@@ -384,23 +412,20 @@ internal abstract class WeebDexParser(
     )
 
     override suspend fun getPages(chapter: MangaChapter): List<MangaPage> {
-        // Extract chapter ID from URL: /manga/{mangaId}/chapter/{chapterId}
         val chapterId = chapter.url.substringAfterLast("/")
-
-        // Fetch chapter data from API
         val json = webClient.httpGet("${apiUrl}chapter/$chapterId").parseJson()
+        val pagesArray = json.optJSONArray("data_optimized")
+            ?: json.optJSONArray("data")
+            ?: JSONArray()
 
-        // Get the CDN node URL
-        val node = json.getString("node")
+        return (0 until pagesArray.length()).mapNotNull { i ->
+            val filename = when (val page = pagesArray.opt(i)) {
+                is JSONObject -> page.optString("name")
+                is String -> page
+                else -> null
+            }?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
 
-        // Prefer optimized webp images, fallback to original data
-        val pagesArray = json.optJSONArray("data_optimized") ?: json.getJSONArray("data")
-
-        return (0 until pagesArray.length()).map { i ->
-            val pageObj = pagesArray.getJSONObject(i)
-            val filename = pageObj.getString("name")
-            val pageUrl = "$node/data/$chapterId/$filename"
-
+            val pageUrl = "$dataCdnUrl$chapterId/$filename"
             MangaPage(
                 id = generateUid(pageUrl),
                 url = pageUrl,

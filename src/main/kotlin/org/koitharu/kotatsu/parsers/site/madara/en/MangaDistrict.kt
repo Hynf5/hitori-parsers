@@ -21,7 +21,7 @@ internal class MangaDistrict(context: MangaLoaderContext) :
 	override suspend fun getChapters(manga: Manga, doc: Document): List<MangaChapter> {
 		val slug = manga.url.removeSuffix('/').substringAfterLast('/')
 		val doc2 = webClient.httpPost(
-			"https://$domain/title/$slug/ajax/chapters/",
+			"https://$domain/series/$slug/ajax/chapters/",
 			mapOf(),
 		).parseHtml()
 		val ul = doc2.body().selectFirstOrThrow("ul")

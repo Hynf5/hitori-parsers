@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl:*)",
+      "WebFetch(domain:klz9.com)",
+      "WebSearch",
+      "Bash(find:*)"
+    ]
+  }
+}

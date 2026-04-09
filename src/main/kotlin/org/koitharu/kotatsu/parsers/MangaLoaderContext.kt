@@ -128,19 +128,4 @@ public abstract class MangaLoaderContext {
     ): List<String> {
         throw UnsupportedOperationException("WebView URL capture is not available")
     }
-
-    /**
-     * Extract VRF (Verification Response Format) token from MangaFire-style AJAX requests
-     * Loads the page and captures AJAX requests containing VRF parameters.
-     *
-     * @param pageUrl The manga page URL to load
-     * @param timeout Maximum time to wait for VRF token (milliseconds)
-     * @return The extracted VRF token, or null if not found
-     */
-    public open suspend fun extractVrfToken(
-        pageUrl: String,
-        timeout: Long = 15000L
-    ): String? {
-        throw UnsupportedOperationException("VRF token extraction is not available")
-    }
 }
