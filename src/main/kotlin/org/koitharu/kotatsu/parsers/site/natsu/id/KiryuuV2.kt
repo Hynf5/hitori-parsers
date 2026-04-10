@@ -7,7 +7,7 @@ import org.koitharu.kotatsu.parsers.model.MangaParserSource
 import org.koitharu.kotatsu.parsers.site.natsu.NatsuParser
 
 @MangaSourceParser("KIRYUUV2", "KiryuuV2", "id")
-internal class Ikiru(context: MangaLoaderContext) :
+internal class KiryuuV2(context: MangaLoaderContext) :
     NatsuParser(context, MangaParserSource.KIRYUUV2, pageSize = 24) {
 
     override val configKeyDomain = ConfigKey.Domain("v1.kiryuu.to")
