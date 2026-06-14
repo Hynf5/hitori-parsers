@@ -23,7 +23,7 @@ internal class WestmangaParser(context: MangaLoaderContext) :
 	override val configKeyDomain = ConfigKey.Domain("westmanga.cc")
 
 	private val apiDomain: String
-		get() = "data.$domain"
+    get() = "data.mantweh.online" 
 		
 	private val accessKey = "WM_WEB_FRONT_END"
 	private val secretKey = "xxxoidj"
