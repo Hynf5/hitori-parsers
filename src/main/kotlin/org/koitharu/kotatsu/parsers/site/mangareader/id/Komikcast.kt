@@ -69,6 +69,23 @@ internal class Komikcast(context: MangaLoaderContext) :
 				append("&takeChapter=2")
 				append("&includeMeta=true")
 
+				// 🔥 TAMBAHAN FIX SORTING 🔥
+				when (order) {
+					SortOrder.UPDATED, SortOrder.NEWEST -> {
+						append("&sort=latest&sortOrder=desc")
+					}
+					SortOrder.POPULARITY -> {
+						append("&sort=popularity&sortOrder=desc")
+					}
+					SortOrder.ALPHABETICAL -> {
+						append("&sort=title&sortOrder=asc")
+					}
+					SortOrder.ALPHABETICAL_DESC -> {
+						append("&sort=title&sortOrder=desc")
+					}
+					else -> {}
+				}
+
 				filter.types.oneOrThrowIfMany()?.let { contentType ->
 					append("&type=")
 					append(when (contentType) {
