@@ -161,7 +161,16 @@ internal class DoujinDesuParser(context: MangaLoaderContext) :
 	}
 
 	override suspend fun getDetails(manga: Manga): Manga {
-		val docs = webClient.httpGet(manga.url.toAbsoluteUrl(domain)).parseHtml().selectFirstOrThrow("#archive")
+		val targetUrl = manga.url.toAbsoluteUrl(domain)
+		var response = webClient.httpGet(targetUrl)
+		
+		// 🔥 FIX IKLAN: Cek apakah server membelokkan (redirect) URL kita ke halaman Iklan
+		if (response.request.url.toString().trimEnd('/') != targetUrl.trimEnd('/')) {
+			response.close() // Tutup koneksi halaman iklan
+			response = webClient.httpGet(targetUrl) // Request ulang ke komik asli (sekarang pasti lolos)
+		}
+		
+		val docs = response.parseHtml().selectFirstOrThrow("#archive")
 		val chapterDateFormat = SimpleDateFormat("EEEE, dd MMMM yyyy", sourceLocale)
 		val metadataEl = docs.selectFirst(".wrapper > .metadata tbody")
 		val state = when (metadataEl?.selectFirst("tr:contains(Status)")?.selectLast("td")?.text()) {
@@ -204,7 +213,16 @@ internal class DoujinDesuParser(context: MangaLoaderContext) :
 	}
 
 	override suspend fun getPages(chapter: MangaChapter): List<MangaPage> {
-		val id = webClient.httpGet(chapter.url.toAbsoluteUrl(domain)).parseHtml()
+		val targetUrl = chapter.url.toAbsoluteUrl(domain)
+		var response = webClient.httpGet(targetUrl)
+		
+		// 🔥 FIX IKLAN: Pertahanan yang sama untuk halaman Chapter
+		if (response.request.url.toString().trimEnd('/') != targetUrl.trimEnd('/')) {
+			response.close()
+			response = webClient.httpGet(targetUrl)
+		}
+		
+		val id = response.parseHtml()
 			.requireElementById("reader")
 			.attr("data-id")
 		
