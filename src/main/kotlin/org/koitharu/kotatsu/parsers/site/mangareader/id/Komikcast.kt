@@ -63,7 +63,7 @@ internal class Komikcast(context: MangaLoaderContext) :
 			} else {
 				// Normal listing with pagination
 				append("?page=")
-				append(page + 1)
+				append(page)
 				append("&take=")
 				append(pageSize)
 				append("&takeChapter=2")
