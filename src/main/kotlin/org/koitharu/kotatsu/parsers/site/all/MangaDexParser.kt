@@ -328,14 +328,14 @@ internal class MangaDexParser(context: MangaLoaderContext) : FlexibleMangaParser
 		val relations = getJSONArray("relationships").associateByKey("type")
 		val cover = relations["cover_art"]
 			?.firstOrNull()
-			?.getJSONObject("attributes")
-			?.getString("fileName")
+			?.optJSONObject("attributes")
+			?.getStringOrNull("fileName")
 			?.let {
 				"https://uploads.$domain/covers/$id/$it"
 			}
 		val authors: Set<String> = (relations["author"] ?: relations["artist"])
 			?.mapNotNullToSet {
-				it.getJSONObject("attributes")?.getStringOrNull("name")
+				it.optJSONObject("attributes")?.getStringOrNull("name")
 			}.orEmpty()
 
 		return Manga(
