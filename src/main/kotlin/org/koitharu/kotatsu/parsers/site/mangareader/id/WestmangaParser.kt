@@ -18,12 +18,18 @@ import java.util.*
 internal class WestmangaParser(context: MangaLoaderContext) :
     PagedMangaParser(context, MangaParserSource.WESTMANGA, pageSize = 20) {
 
-    override val configKeyDomain = ConfigKey.Domain("westmanga.cc")
+    override val configKeyDomain = ConfigKey.Domain("westmanga.top")
+
+    // Pisahkan domain frontend dan API agar Referer header valid di mata Cloudflare
+    private val frontendDomain: String
+        get() = domain.removePrefix("v1.").removePrefix("api.")
+
+    private val apiDomain: String
+        get() = if (domain.startsWith("v1.")) domain else "v1.$frontendDomain"
 
     private var genresCache: Set<MangaTag>? = null
     private val mutex = Mutex()
 
-    // Token Management variables
     private val visitTokenMutex = Mutex()
     private var visitToken: String? = null
     private var visitTokenExpiresAt: Long = 0L
@@ -62,11 +68,15 @@ internal class WestmangaParser(context: MangaLoaderContext) :
             return@withLock visitToken
         }
 
-        val url = "https://$domain/api/visit-token".toHttpUrl()
+        val url = "https://$apiDomain/api/visit-token".toHttpUrl()
         try {
+            // Header AJAX super ketat untuk membypass Cloudflare WAF
             val headers = Headers.Builder()
                 .add("User-Agent", config[userAgentKey])
-                .add("Referer", "https://$domain/")
+                .add("Accept", "application/json, text/plain, */*")
+                .add("X-Requested-With", "XMLHttpRequest")
+                .add("Origin", "https://$frontendDomain")
+                .add("Referer", "https://$frontendDomain/")
                 .build()
             
             val response = webClient.httpGet(url, headers).parseJson()
@@ -94,7 +104,10 @@ internal class WestmangaParser(context: MangaLoaderContext) :
     private suspend fun createApiHeaders(): Headers {
         val builder = Headers.Builder()
             .add("User-Agent", config[userAgentKey])
-            .add("Referer", "https://$domain/")
+            .add("Accept", "application/json, text/plain, */*")
+            .add("X-Requested-With", "XMLHttpRequest")
+            .add("Origin", "https://$frontendDomain")
+            .add("Referer", "https://$frontendDomain/")
 
         getVisitToken()?.let {
             builder.add("X-WM-Visit", it)
@@ -106,14 +119,13 @@ internal class WestmangaParser(context: MangaLoaderContext) :
         return try {
             webClient.httpGet(url, createApiHeaders()).parseJson()
         } catch (e: Exception) {
-            // Jika token expired/error, force refresh token dan coba request satu kali lagi
             getVisitToken(forceRefresh = true)
             webClient.httpGet(url, createApiHeaders()).parseJson()
         }
     }
 
     override suspend fun getListPage(page: Int, order: SortOrder, filter: MangaListFilter): List<Manga> {
-        val url = "https://$domain/api/contents".toHttpUrl().newBuilder().apply {
+        val url = "https://$apiDomain/api/contents".toHttpUrl().newBuilder().apply {
             if (!filter.query.isNullOrEmpty()) {
                 addQueryParameter("q", filter.query)
             }
@@ -162,7 +174,7 @@ internal class WestmangaParser(context: MangaLoaderContext) :
                 title = jo.getString("title"),
                 altTitles = emptySet(),
                 url = "/manga/$slug/",
-                publicUrl = "https://$domain/comic/$slug",
+                publicUrl = "https://$frontendDomain/comic/$slug",
                 rating = RATING_UNKNOWN,
                 contentRating = null,
                 coverUrl = jo.getString("cover"),
@@ -176,7 +188,7 @@ internal class WestmangaParser(context: MangaLoaderContext) :
 
     override suspend fun getDetails(manga: Manga): Manga {
         val slug = manga.url.removeSurrounding("/manga/", "/")
-        val url = "https://$domain/api/comic/$slug".toHttpUrl()
+        val url = "https://$apiDomain/api/comic/$slug".toHttpUrl()
 
         val response = apiGet(url)
         val data = response.getJSONObject("data")
@@ -249,7 +261,7 @@ internal class WestmangaParser(context: MangaLoaderContext) :
 
     override suspend fun getPages(chapter: MangaChapter): List<MangaPage> {
         val slug = chapter.url.removeSurrounding("/", "/")
-        val url = "https://$domain/api/v/$slug".toHttpUrl()
+        val url = "https://$apiDomain/api/v/$slug".toHttpUrl()
 
         val response = apiGet(url)
         val images = response.optJSONObject("data")?.getJSONArray("images")
@@ -257,7 +269,11 @@ internal class WestmangaParser(context: MangaLoaderContext) :
 
         val pages = ArrayList<MangaPage>(images.length())
         for (i in 0 until images.length()) {
-            val imageUrl = images.getString(i)
+            var imageUrl = images.getString(i)
+            // Handle relative image URLs automatically
+            if (!imageUrl.startsWith("http")) {
+                imageUrl = "https://$frontendDomain$imageUrl"
+            }
             pages.add(
                 MangaPage(
                     id = generateUid(imageUrl),
@@ -273,7 +289,7 @@ internal class WestmangaParser(context: MangaLoaderContext) :
     private suspend fun fetchGenres(): Set<MangaTag> = mutex.withLock {
         genresCache?.let { return@withLock it }
 
-        val url = "https://$domain/api/contents/genres".toHttpUrl()
+        val url = "https://$apiDomain/api/contents/genres".toHttpUrl()
         val response = try {
             apiGet(url)
         } catch (e: Exception) {
