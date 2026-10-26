@@ -1,10 +1,10 @@
 package org.koitharu.kotatsu.parsers.site.mangareader.id
 
-import androidx.collection.ArrayMap
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import okhttp3.Headers
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import org.json.JSONObject
 import org.koitharu.kotatsu.parsers.MangaLoaderContext
 import org.koitharu.kotatsu.parsers.MangaSourceParser
 import org.koitharu.kotatsu.parsers.config.ConfigKey
@@ -13,23 +13,23 @@ import org.koitharu.kotatsu.parsers.model.*
 import org.koitharu.kotatsu.parsers.util.*
 import org.koitharu.kotatsu.parsers.util.json.*
 import java.util.*
-import javax.crypto.Mac
-import javax.crypto.spec.SecretKeySpec
 
 @MangaSourceParser("WESTMANGA", "WestManga", "id")
 internal class WestmangaParser(context: MangaLoaderContext) :
 	PagedMangaParser(context, MangaParserSource.WESTMANGA, pageSize = 20) {
 
-	override val configKeyDomain = ConfigKey.Domain("v1.westmanga.cc")
+	override val configKeyDomain = ConfigKey.Domain("westmanga.cc")
 
 	private val apiDomain: String
-    get() = "data.mantweh.online" 
-		
-	private val accessKey = "WM_WEB_FRONT_END"
-	private val secretKey = "xxxoidj"
+		get() = "data.mantweh.online" 
 
 	private var genresCache: Set<MangaTag>? = null
 	private val mutex = Mutex()
+
+	// Variabel untuk menyimpan (cache) visit token baru
+	private val visitTokenMutex = Mutex()
+	private var visitTokenCache: String? = null
+	private var visitTokenExpiresAt = 0L
 
 	override fun onCreateConfig(keys: MutableCollection<ConfigKey<*>>) {
 		super.onCreateConfig(keys)
@@ -99,7 +99,7 @@ internal class WestmangaParser(context: MangaLoaderContext) :
 			}
 		}.build()
 
-		val response = webClient.httpGet(url, createApiHeaders(url)).parseJson()
+		val response = apiGet(url)
 		val mangaArray = response.optJSONArray("data") ?: return emptyList()
 
 		return mangaArray.mapJSON { jo ->
@@ -125,7 +125,7 @@ internal class WestmangaParser(context: MangaLoaderContext) :
 		val slug = manga.url.removeSurrounding("/manga/", "/")
 		val url = "https://$apiDomain/api/comic/$slug".toHttpUrl()
 
-		val response = webClient.httpGet(url, createApiHeaders(url)).parseJson()
+		val response = apiGet(url)
 		val data = response.getJSONObject("data")
 
 		val tags = buildSet {
@@ -198,7 +198,7 @@ internal class WestmangaParser(context: MangaLoaderContext) :
 		val slug = chapter.url.removeSurrounding("/", "/")
 		val url = "https://$apiDomain/api/v/$slug".toHttpUrl()
 
-		val response = webClient.httpGet(url, createApiHeaders(url)).parseJson()
+		val response = apiGet(url)
 		val images = response.optJSONObject("data")?.getJSONArray("images")
 			?: response.getJSONArray("images")
 
@@ -221,7 +221,7 @@ internal class WestmangaParser(context: MangaLoaderContext) :
 		genresCache?.let { return@withLock it }
 
 		val url = "https://$apiDomain/api/contents/genres".toHttpUrl()
-		val response = webClient.httpGet(url, createApiHeaders(url)).parseJson()
+		val response = apiGet(url)
 		val genresArray = response.optJSONArray("data") ?: return@withLock emptySet()
 
 		val genres = genresArray.mapJSONToSet { genreObj ->
@@ -236,24 +236,87 @@ internal class WestmangaParser(context: MangaLoaderContext) :
 		return@withLock genres
 	}
 
-	private fun createApiHeaders(url: okhttp3.HttpUrl): Headers {
-		val timestamp = (System.currentTimeMillis() / 1000).toString()
-		val message = "wm-api-request"
-		val key = timestamp + "GET" + url.encodedPath + accessKey + secretKey
+	/**
+	 * Mengambil visit token baru. Jika forceRefresh true, abaikan cache lama.
+	 */
+	private suspend fun getVisitToken(forceRefresh: Boolean = false): String? = visitTokenMutex.withLock {
+		val now = System.currentTimeMillis()
+		
+		// Gunakan cache jika belum kedaluwarsa (beri jarak 5 menit / 300,000 ms)
+		if (!forceRefresh && visitTokenCache != null && now < visitTokenExpiresAt - 300_000L) {
+			return@withLock visitTokenCache
+		}
 
-		val mac = Mac.getInstance("HmacSHA256")
-		val secretKeySpec = SecretKeySpec(key.toByteArray(Charsets.UTF_8), "HmacSHA256")
-		mac.init(secretKeySpec)
-		val hash = mac.doFinal(message.toByteArray(Charsets.UTF_8))
-		val signature = hash.joinToString("") { "%02x".format(it) }
+		val url = "https://$apiDomain/api/visit-token".toHttpUrl()
 
-		return Headers.Builder()
+		try {
+			val headers = Headers.Builder()
+				.add("User-Agent", config[userAgentKey])
+				.add("Referer", "https://$domain/")
+				.build()
+
+			val response = webClient.httpGet(url, headers)
+			
+			if (response.isSuccessful) {
+				val json = response.parseJson()
+				if (json.optBoolean("status", false)) {
+					val token = json.optString("token", "")
+					if (token.isNotEmpty()) {
+						visitTokenCache = token
+						val expiresAtSec = json.optLong("expiresAt", 0L)
+						visitTokenExpiresAt = if (expiresAtSec > 0) {
+							expiresAtSec * 1000L
+						} else {
+							now + 3600_000L // Default expire 1 jam jika gagal diparsing
+						}
+						return@withLock visitTokenCache
+					}
+				}
+			} else {
+				response.close()
+			}
+		} catch (e: Exception) {
+			e.printStackTrace()
+		}
+
+		// Reset token jika gagal atau force refresh dipanggil
+		if (forceRefresh) {
+			visitTokenCache = null
+			visitTokenExpiresAt = 0L
+		}
+		
+		return@withLock visitTokenCache
+	}
+
+	/**
+	 * Helper untuk melakukan HTTP GET request dengan otomatis memasang X-WM-Visit token.
+	 * Jika server mengembalikan 403 atau 404 karena token hangus, fungsi ini akan otomatis merefresh token 1x.
+	 */
+	private suspend fun apiGet(url: okhttp3.HttpUrl, forceRefresh: Boolean = false): JSONObject {
+		var token = getVisitToken(forceRefresh)
+		
+		var headers = Headers.Builder()
 			.add("User-Agent", config[userAgentKey])
 			.add("Referer", "https://$domain/")
-			.add("x-wm-request-time", timestamp)
-			.add("x-wm-accses-key", accessKey)
-			.add("x-wm-request-signature", signature)
+			.apply { token?.let { add("X-WM-Visit", it) } }
 			.build()
+
+		var response = webClient.httpGet(url, headers)
+
+		// Jika ditolak (HTTP 403/404), token lama mungkin expired atau tidak valid. Refresh token dan coba lagi.
+		if (!response.isSuccessful && (response.code == 403 || response.code == 404) && !forceRefresh) {
+			response.close() // Tutup body respon lama agar tidak memory leak
+			token = getVisitToken(forceRefresh = true)
+			
+			headers = Headers.Builder()
+				.add("User-Agent", config[userAgentKey])
+				.add("Referer", "https://$domain/")
+				.apply { token?.let { add("X-WM-Visit", it) } }
+				.build()
+				
+			response = webClient.httpGet(url, headers)
+		}
+
+		return response.parseJson()
 	}
-    }
-    
+}
